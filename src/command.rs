@@ -138,6 +138,7 @@ impl KeyTable {
         // Buffer operations
         self.bind(Key::ctlx_ctrl('f'), find_file);
         self.bind(Key::ctlx('b'), switch_buffer);
+        self.bind(Key::ctlx_ctrl('b'), list_buffers);  // C-x C-b
         self.bind(Key::ctlx('k'), kill_buffer);
 
         // Go to line
@@ -1009,6 +1010,12 @@ pub mod commands {
             .find(|(i, _)| *i != current_buf)
             .map(|(_, b)| b.name().to_string());
         editor.start_prompt("Switch to buffer", crate::editor::PromptAction::SwitchBuffer, default);
+        Ok(CommandStatus::Success)
+    }
+
+    /// List all buffers
+    pub fn list_buffers(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.list_buffers();
         Ok(CommandStatus::Success)
     }
 

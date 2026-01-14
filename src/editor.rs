@@ -1189,4 +1189,70 @@ impl EditorState {
         }
         Ok(())
     }
+
+    /// Create or update the buffer list and switch to it
+    pub fn list_buffers(&mut self) {
+        // Generate buffer list content
+        let mut content = String::new();
+        content.push_str(" MR Buffer           Size  File\n");
+        content.push_str(" -- ------           ----  ----\n");
+
+        for (idx, buffer) in self.buffers.iter().enumerate() {
+            // Check if this buffer is displayed in current window
+            let current_marker = if self.current_window().buffer_idx() == idx {
+                '.'
+            } else {
+                ' '
+            };
+
+            // Modified marker
+            let modified_marker = if buffer.is_modified() { '*' } else { ' ' };
+
+            // Buffer name (truncate if too long)
+            let name = buffer.name();
+            let name_display = if name.len() > 16 {
+                &name[..16]
+            } else {
+                name
+            };
+
+            // Size (line count)
+            let size = buffer.line_count();
+
+            // File path
+            let file = buffer
+                .filename()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+
+            content.push_str(&format!(
+                " {}{} {:<16} {:>5}  {}\n",
+                current_marker, modified_marker, name_display, size, file
+            ));
+        }
+
+        // Find or create the *Buffer List* buffer
+        let list_buf_name = "*Buffer List*";
+        if let Some(idx) = self.buffers.iter().position(|b| b.name() == list_buf_name) {
+            // Update existing buffer
+            self.buffers[idx].set_content(&content);
+            // Switch to it
+            if let Some(window) = self.windows.get_mut(self.current_window) {
+                window.set_buffer_idx(idx);
+                window.set_cursor(0, 0);
+            }
+        } else {
+            // Create new buffer
+            let buffer = Buffer::from_content(list_buf_name, &content);
+            self.buffers.push(buffer);
+            let idx = self.buffers.len() - 1;
+            if let Some(window) = self.windows.get_mut(self.current_window) {
+                window.set_buffer_idx(idx);
+                window.set_cursor(0, 0);
+            }
+        }
+
+        self.display.force_redraw();
+        self.display.set_message("");
+    }
 }

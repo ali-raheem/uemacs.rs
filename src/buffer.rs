@@ -76,6 +76,47 @@ impl Buffer {
         }
     }
 
+    /// Create a buffer from string content
+    pub fn from_content(name: impl Into<String>, content: &str) -> Self {
+        let lines: Vec<Line> = if content.is_empty() {
+            vec![Line::new()]
+        } else {
+            content.lines().map(Line::from).collect()
+        };
+
+        let lines = if lines.is_empty() {
+            vec![Line::new()]
+        } else {
+            lines
+        };
+
+        Self {
+            lines,
+            name: name.into(),
+            filename: None,
+            modified: false,
+            modes: BufferModes::default(),
+            undo_stack: Vec::new(),
+            recording_undo: false, // Don't record undo for generated buffers
+        }
+    }
+
+    /// Set buffer content from string (replaces all lines)
+    pub fn set_content(&mut self, content: &str) {
+        self.lines = if content.is_empty() {
+            vec![Line::new()]
+        } else {
+            content.lines().map(Line::from).collect()
+        };
+
+        if self.lines.is_empty() {
+            self.lines = vec![Line::new()];
+        }
+
+        self.modified = false;
+        self.undo_stack.clear();
+    }
+
     /// Create a buffer from file contents
     pub fn from_file(path: &PathBuf) -> std::io::Result<Self> {
         let content = std::fs::read_to_string(path)?;
