@@ -8,7 +8,10 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 
 ## Original C Build (Reference Implementation)
 
+The original C code is in the `c-reference/` subdirectory.
+
 ```bash
+cd c-reference
 make          # Build (output: em)
 make clean    # Clean artifacts
 ```
@@ -208,6 +211,26 @@ pub type CommandFn = fn(&mut EditorState, bool, i32) -> Result<CommandStatus>;
 // Returns: Success, Failure, or Abort
 ```
 
+#### Incremental Search Design
+
+Search state is embedded in EditorState:
+
+```rust
+pub struct SearchState {
+    pub active: bool,           // In search mode?
+    pub pattern: String,        // Current search pattern
+    pub direction: SearchDirection,  // Forward or Backward
+    pub origin_line: usize,     // Starting position (for abort)
+    pub origin_col: usize,
+}
+```
+
+- `start_search(direction)` enters search mode
+- `handle_search_key()` processes keys during search
+- C-s/C-r repeats search in forward/backward direction
+- Backspace removes from pattern and re-searches from origin
+- C-g aborts (restores origin), Enter exits at current position
+
 #### Key Codes Reference
 
 From `src/input.rs`:
@@ -216,6 +239,7 @@ From `src/input.rs`:
 - Enter: `Key::ctrl('m')`
 - Tab: `Key::ctrl('i')`
 - Arrows: `Key::special(0x48/0x50/0x4b/0x4d)` (Up/Down/Left/Right)
+- Meta + key: `Key::meta('x')` or `Key(0x2000_0000 | char)`
 
 ## Build Commands
 
