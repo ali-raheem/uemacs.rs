@@ -1,0 +1,10 @@
+[package]
+name = "uemacs"
+version = "0.1.0"
+edition = "2021"
+description = "uEmacs/PK text editor ported to Rust"
+
+[dependencies]
+crossterm = "0.27"
+unicode-width = "0.1"
+thiserror = "1.0"
