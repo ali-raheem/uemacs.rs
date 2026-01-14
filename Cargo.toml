@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 author = "Ali Raheem"
 description = "uEmacs/PK text editor ported to Rust made with Claude Code"
+license-file = "LICENSE.txt"
 
 [dependencies]
 crossterm = "0.27"
