@@ -113,51 +113,59 @@ Keys are integers with modifier flags:
 | Terminal | `src/terminal.rs` | Complete - crossterm-based |
 | Display | `src/display.rs` | Complete - screen rendering |
 | Input | `src/input.rs` | Complete - key translation |
-| Command | `src/command.rs` | In progress - command dispatch |
-| Editor | `src/editor.rs` | In progress - main state/loop |
+| Command | `src/command.rs` | Complete - 30+ commands implemented |
+| Editor | `src/editor.rs` | Complete - main state/loop with search |
 | Error | `src/error.rs` | Complete - error types |
 | Main | `src/main.rs` | Complete - entry point |
 
 ### Working Features
 
+**Navigation:**
 - Cursor movement (C-f, C-b, C-n, C-p, arrows)
 - Line navigation (C-a, C-e, Home, End)
 - Page movement (C-v, M-v, PageUp, PageDown)
 - Buffer navigation (M-<, M->)
+- Word movement (M-f, M-b)
+
+**Editing:**
 - Self-insert characters
-- File loading
+- Delete forward/backward (C-d, Del, Backspace, C-h)
+- Kill line (C-k) with kill ring
+- Yank (C-y)
+- Kill/copy word (M-d, M-Backspace)
+- Newline (Enter), open line (C-o), indent newline (C-j)
+- Tab insertion (Tab)
+- Transpose characters (C-t)
+- Quote literal character (C-q)
+
+**Mark/Region:**
+- Set mark (C-space)
+- Kill region (C-w)
+- Copy region (M-w)
+
+**Search:**
+- Incremental search forward (C-s)
+- Incremental search backward (C-r)
+- Search wraps around buffer
+- Backspace removes from pattern
+- C-g aborts, Enter exits at match
+
+**File Operations:**
+- File loading (command line argument)
+- File save (C-x C-s)
 - Display/mode line
 - Screen refresh (C-l)
 - Quit (C-x C-c)
 
-### In-Progress: Text Editing Commands
-
-Commands implemented but need build verification:
-
-| Command | Key | Function | Status |
-|---------|-----|----------|--------|
-| Delete forward | C-d, Del | `delete_char_forward` | Code added |
-| Delete backward | Backspace, C-h | `delete_char_backward` | Code added |
-| Kill line | C-k | `kill_line` | Code added |
-| Yank | C-y | `yank` | Code added |
-| Newline | Enter (C-m) | `newline` | Code added |
-| Open line | C-o | `open_line` | Code added |
-| Indent newline | C-j | `indent_newline` | Code added |
-| Tab | Tab (C-i) | `insert_tab` | Code added |
-| Transpose | C-t | `transpose_chars` | Code added |
-| Quote char | C-q | `quote_char` | Code added |
-
-**Next step:** Run `cargo build` to verify compilation.
-
 ### Uncompleted Tasks (Priority Order)
 
-1. **Build and test** - Verify text editing commands compile and work
-2. **Search/Replace** - Forward/reverse search, incremental search (isearch)
-3. **File operations** - Save (C-x C-s), write-to, file switching
-4. **Multiple buffers** - Buffer switching (C-x b), buffer list
-5. **Multiple windows** - Window split (C-x 2), window switching (C-x o)
-6. **Word operations** - Forward/backward word, kill word
-7. **Region operations** - Set mark (C-space), kill region, copy region
+1. **Buffer operations** - C-x b (switch buffer), C-x k (kill buffer), C-x C-f (find file)
+2. **Multiple windows** - C-x 2 (split), C-x 1 (one window), C-x o (other window)
+3. **Go to line** - M-g g (goto-line)
+4. **Undo** - C-/ or C-_ (requires undo stack)
+5. **Search & replace** - M-% (query-replace)
+6. **Paragraph operations** - M-{ M-} (paragraph movement), M-q (fill)
+7. **Shell command** - M-! (shell-command)
 
 ### Architectural Decisions
 
