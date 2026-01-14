@@ -4,6 +4,35 @@ use std::path::PathBuf;
 
 use crate::line::Line;
 
+/// An entry in the undo stack
+#[derive(Debug, Clone)]
+pub enum UndoEntry {
+    /// Text was inserted at (line, col) - to undo, delete it
+    Insert {
+        line: usize,
+        col: usize,
+        text: String,
+    },
+    /// Text was deleted from (line, col) - to undo, insert it back
+    Delete {
+        line: usize,
+        col: usize,
+        text: String,
+    },
+    /// A newline was inserted, splitting line at col - to undo, join lines
+    InsertNewline {
+        line: usize,
+        col: usize,
+    },
+    /// Lines were joined (newline deleted) - to undo, split them
+    DeleteNewline {
+        line: usize,
+        col: usize,  // Where the join happened
+    },
+    /// Boundary marker for grouping multiple operations
+    Boundary,
+}
+
 /// Buffer flags/modes (matching original C version)
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BufferModes {
@@ -27,6 +56,10 @@ pub struct Buffer {
     modified: bool,
     /// Buffer modes
     modes: BufferModes,
+    /// Undo stack
+    undo_stack: Vec<UndoEntry>,
+    /// Whether to record undo entries (disabled during undo itself)
+    recording_undo: bool,
 }
 
 impl Buffer {
@@ -38,6 +71,8 @@ impl Buffer {
             filename: None,
             modified: false,
             modes: BufferModes::default(),
+            undo_stack: Vec::new(),
+            recording_undo: true,
         }
     }
 
@@ -68,6 +103,8 @@ impl Buffer {
             filename: Some(path.clone()),
             modified: false,
             modes: BufferModes::default(),
+            undo_stack: Vec::new(),
+            recording_undo: true,
         })
     }
 
@@ -131,6 +168,11 @@ impl Buffer {
         if let Some(line) = self.lines.get_mut(line_idx) {
             line.insert_char(byte_pos, ch);
             self.modified = true;
+            self.push_undo(UndoEntry::Insert {
+                line: line_idx,
+                col: byte_pos,
+                text: ch.to_string(),
+            });
         }
     }
 
@@ -140,6 +182,10 @@ impl Buffer {
             let new_line = line.split_off(byte_pos);
             self.lines.insert(line_idx + 1, new_line);
             self.modified = true;
+            self.push_undo(UndoEntry::InsertNewline {
+                line: line_idx,
+                col: byte_pos,
+            });
         }
     }
 
@@ -152,6 +198,11 @@ impl Buffer {
                 let ch_len = ch.len_utf8();
                 line.delete_range(byte_pos, byte_pos + ch_len);
                 self.modified = true;
+                self.push_undo(UndoEntry::Delete {
+                    line: line_idx,
+                    col: byte_pos,
+                    text: ch.to_string(),
+                });
                 return Some(ch);
             }
         }
@@ -170,6 +221,11 @@ impl Buffer {
                     let new_pos = byte_pos - ch_len;
                     line.delete_range(new_pos, byte_pos);
                     self.modified = true;
+                    self.push_undo(UndoEntry::Delete {
+                        line: line_idx,
+                        col: new_pos,
+                        text: ch.to_string(),
+                    });
                     return Some((ch, new_pos));
                 }
             }
@@ -182,8 +238,13 @@ impl Buffer {
         if line_idx + 1 < self.lines.len() {
             let next_line = self.lines.remove(line_idx + 1);
             if let Some(line) = self.lines.get_mut(line_idx) {
+                let join_col = line.len();
                 line.append(next_line);
                 self.modified = true;
+                self.push_undo(UndoEntry::DeleteNewline {
+                    line: line_idx,
+                    col: join_col,
+                });
                 return true;
             }
         }
@@ -198,6 +259,10 @@ impl Buffer {
                 let join_pos = prev_line.len();
                 prev_line.append(current_line);
                 self.modified = true;
+                self.push_undo(UndoEntry::DeleteNewline {
+                    line: line_idx - 1,
+                    col: join_pos,
+                });
                 return Some(join_pos);
             }
         }
@@ -207,8 +272,24 @@ impl Buffer {
     /// Delete a line by index
     pub fn delete_line(&mut self, line_idx: usize) {
         if line_idx < self.lines.len() && self.lines.len() > 1 {
-            self.lines.remove(line_idx);
+            let removed = self.lines.remove(line_idx);
             self.modified = true;
+            // Record deletion of line content
+            if !removed.is_empty() {
+                self.push_undo(UndoEntry::Delete {
+                    line: line_idx,
+                    col: 0,
+                    text: removed.text().to_string(),
+                });
+            }
+            // Record deletion of the newline that joined this with next/prev
+            if line_idx > 0 {
+                // Line was joined with previous
+                self.push_undo(UndoEntry::DeleteNewline {
+                    line: line_idx - 1,
+                    col: self.lines.get(line_idx - 1).map(|l| l.len()).unwrap_or(0),
+                });
+            }
         }
     }
 
@@ -219,9 +300,15 @@ impl Buffer {
             if byte_pos < line_len {
                 let killed = line.delete_range(byte_pos, line_len);
                 self.modified = true;
+                self.push_undo(UndoEntry::Delete {
+                    line: line_idx,
+                    col: byte_pos,
+                    text: killed.clone(),
+                });
                 return Some(killed);
             } else if line_idx + 1 < self.lines.len() {
                 // At end of line, kill the newline (join with next)
+                // join_line will record its own undo entry
                 self.join_line(line_idx);
                 return Some("\n".to_string());
             }
@@ -252,6 +339,94 @@ impl Buffer {
             }
         }
         Ok(())
+    }
+
+    /// Push an undo entry (if recording is enabled)
+    fn push_undo(&mut self, entry: UndoEntry) {
+        if self.recording_undo {
+            self.undo_stack.push(entry);
+        }
+    }
+
+    /// Add a boundary marker to group operations
+    pub fn add_undo_boundary(&mut self) {
+        if self.recording_undo && !self.undo_stack.is_empty() {
+            // Only add if last entry isn't already a boundary
+            if !matches!(self.undo_stack.last(), Some(UndoEntry::Boundary)) {
+                self.undo_stack.push(UndoEntry::Boundary);
+            }
+        }
+    }
+
+    /// Perform undo, returns (line, col) to move cursor to, or None if nothing to undo
+    pub fn undo(&mut self) -> Option<(usize, usize)> {
+        // Disable recording while undoing
+        self.recording_undo = false;
+
+        // Skip any boundary at the top
+        while matches!(self.undo_stack.last(), Some(UndoEntry::Boundary)) {
+            self.undo_stack.pop();
+        }
+
+        let mut cursor_pos = None;
+
+        // Undo entries until we hit a boundary or empty
+        while let Some(entry) = self.undo_stack.pop() {
+            match entry {
+                UndoEntry::Boundary => break,
+                UndoEntry::Insert { line, col, text } => {
+                    // Text was inserted, so delete it
+                    if let Some(line_ref) = self.lines.get_mut(line) {
+                        let end = col + text.len();
+                        if end <= line_ref.len() {
+                            line_ref.delete_range(col, end);
+                        }
+                    }
+                    cursor_pos = Some((line, col));
+                }
+                UndoEntry::Delete { line, col, text } => {
+                    // Text was deleted, so insert it back
+                    if let Some(line_ref) = self.lines.get_mut(line) {
+                        let text_to_insert = text.clone();
+                        for (i, ch) in text_to_insert.chars().enumerate() {
+                            line_ref.insert_char(col + i, ch);
+                        }
+                    }
+                    cursor_pos = Some((line, col + text.len()));
+                }
+                UndoEntry::InsertNewline { line, col } => {
+                    // Newline was inserted, so join the lines
+                    if line + 1 < self.lines.len() {
+                        let next_line = self.lines.remove(line + 1);
+                        if let Some(current) = self.lines.get_mut(line) {
+                            current.append(next_line);
+                        }
+                    }
+                    cursor_pos = Some((line, col));
+                }
+                UndoEntry::DeleteNewline { line, col } => {
+                    // Newline was deleted (lines joined), so split them
+                    if let Some(line_ref) = self.lines.get_mut(line) {
+                        let new_line = line_ref.split_off(col);
+                        self.lines.insert(line + 1, new_line);
+                    }
+                    cursor_pos = Some((line, col));
+                }
+            }
+        }
+
+        self.recording_undo = true;
+
+        if cursor_pos.is_some() {
+            self.modified = true;
+        }
+
+        cursor_pos
+    }
+
+    /// Check if there's anything to undo
+    pub fn can_undo(&self) -> bool {
+        self.undo_stack.iter().any(|e| !matches!(e, UndoEntry::Boundary))
     }
 }
 

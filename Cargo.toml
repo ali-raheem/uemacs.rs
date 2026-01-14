@@ -2,7 +2,8 @@
 name = "uemacs"
 version = "0.1.0"
 edition = "2021"
-description = "uEmacs/PK text editor ported to Rust"
+author = "Ali Raheem"
+description = "uEmacs/PK text editor ported to Rust made with Claude Code"
 
 [dependencies]
 crossterm = "0.27"

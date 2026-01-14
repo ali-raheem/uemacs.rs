@@ -149,6 +149,7 @@ Keys are integers with modifier flags:
 **Search:**
 - Incremental search forward (C-s)
 - Incremental search backward (C-r)
+- Query replace (M-%) - search and replace with confirmation
 - Search wraps around buffer
 - Backspace removes from pattern
 - C-g aborts, Enter exits at match
@@ -156,19 +157,33 @@ Keys are integers with modifier flags:
 **File Operations:**
 - File loading (command line argument)
 - File save (C-x C-s)
+- Find file (C-x C-f) - open existing or create new
 - Display/mode line
 - Screen refresh (C-l)
 - Quit (C-x C-c)
 
+**Buffer Operations:**
+- Switch buffer (C-x b)
+- Kill buffer (C-x k)
+- Go to line (M-g)
+
+**Multiple Windows:**
+- Split window (C-x 2)
+- Delete other windows (C-x 1)
+- Delete window (C-x 0)
+- Other window (C-x o)
+
+**Undo:**
+- Undo (C-/ or C-_)
+- Supports undoing insert, delete, newline, line joins
+- Boundary markers group operations
+
 ### Uncompleted Tasks (Priority Order)
 
-1. **Buffer operations** - C-x b (switch buffer), C-x k (kill buffer), C-x C-f (find file)
-2. **Multiple windows** - C-x 2 (split), C-x 1 (one window), C-x o (other window)
-3. **Go to line** - M-g g (goto-line)
-4. **Undo** - C-/ or C-_ (requires undo stack)
-5. **Search & replace** - M-% (query-replace)
-6. **Paragraph operations** - M-{ M-} (paragraph movement), M-q (fill)
-7. **Shell command** - M-! (shell-command)
+1. **List buffers** - C-x C-b (buffer list in special buffer)
+2. **Paragraph operations** - M-{ M-} (paragraph movement), M-q (fill)
+3. **Shell command** - M-! (shell-command)
+4. **Keyboard macros** - C-x ( start, C-x ) end, C-x e execute
 
 ### Architectural Decisions
 
@@ -211,6 +226,25 @@ pub type CommandFn = fn(&mut EditorState, bool, i32) -> Result<CommandStatus>;
 // Returns: Success, Failure, or Abort
 ```
 
+#### Undo Stack Design
+
+Undo uses a simple stack-based approach in Buffer:
+
+```rust
+pub enum UndoEntry {
+    Insert { line: usize, col: usize, text: String },     // Text inserted
+    Delete { line: usize, col: usize, text: String },     // Text deleted
+    InsertNewline { line: usize, col: usize },            // Line split
+    DeleteNewline { line: usize, col: usize },            // Lines joined
+    Boundary,                                              // Group marker
+}
+```
+
+- Each edit operation pushes an undo entry
+- `undo()` reverses operations until hitting a boundary or empty stack
+- `add_undo_boundary()` groups consecutive operations
+- Recording is disabled during undo itself (prevents redo-as-undo issues)
+
 #### Incremental Search Design
 
 Search state is embedded in EditorState:
@@ -230,6 +264,14 @@ pub struct SearchState {
 - C-s/C-r repeats search in forward/backward direction
 - Backspace removes from pattern and re-searches from origin
 - C-g aborts (restores origin), Enter exits at current position
+
+#### Windows Key Input Fix
+
+On Windows, crossterm sends multiple event types (Press, Release, Repeat) for each keystroke. The input handler filters to only process `KeyEventKind::Press` events to prevent double-execution of commands.
+
+Visual feedback is shown when prefix keys are pending:
+- "C-x -" appears when waiting for C-x continuation
+- "ESC -" appears when waiting for Meta/ESC continuation
 
 #### Key Codes Reference
 

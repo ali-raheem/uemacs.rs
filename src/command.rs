@@ -133,6 +133,25 @@ impl KeyTable {
         // Search
         self.bind(Key::ctrl('s'), search_forward);
         self.bind(Key::ctrl('r'), search_backward);
+        self.bind(Key::meta('%'), query_replace);  // M-%
+
+        // Buffer operations
+        self.bind(Key::ctlx_ctrl('f'), find_file);
+        self.bind(Key::ctlx('b'), switch_buffer);
+        self.bind(Key::ctlx('k'), kill_buffer);
+
+        // Go to line
+        self.bind(Key::meta('g'), goto_line);
+
+        // Window operations
+        self.bind(Key::ctlx('2'), split_window);
+        self.bind(Key::ctlx('1'), delete_other_windows);
+        self.bind(Key::ctlx('0'), delete_window);
+        self.bind(Key::ctlx('o'), other_window);
+
+        // Undo
+        self.bind(Key::ctrl('/'), undo);  // C-/
+        self.bind(Key::ctrl('_'), undo);  // C-_ (same as C-/ in many terminals)
     }
 }
 
@@ -969,6 +988,76 @@ pub mod commands {
         Ok(CommandStatus::Success)
     }
 
+    /// Query replace (search and replace with confirmation)
+    pub fn query_replace(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.start_prompt("Query replace", crate::editor::PromptAction::QueryReplaceSearch, None);
+        Ok(CommandStatus::Success)
+    }
+
+    /// Find file (open or create)
+    pub fn find_file(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.start_prompt("Find file", crate::editor::PromptAction::FindFile, None);
+        Ok(CommandStatus::Success)
+    }
+
+    /// Switch to buffer
+    pub fn switch_buffer(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        // Default to the "other" buffer (most recently used that isn't current)
+        let current_buf = editor.current_window().buffer_idx();
+        let default = editor.buffers.iter()
+            .enumerate()
+            .find(|(i, _)| *i != current_buf)
+            .map(|(_, b)| b.name().to_string());
+        editor.start_prompt("Switch to buffer", crate::editor::PromptAction::SwitchBuffer, default);
+        Ok(CommandStatus::Success)
+    }
+
+    /// Kill buffer
+    pub fn kill_buffer(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        // Default to current buffer
+        let default = Some(editor.current_buffer().name().to_string());
+        editor.start_prompt("Kill buffer", crate::editor::PromptAction::KillBuffer, default);
+        Ok(CommandStatus::Success)
+    }
+
+    /// Go to line number
+    pub fn goto_line(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.start_prompt("Goto line", crate::editor::PromptAction::GotoLine, None);
+        Ok(CommandStatus::Success)
+    }
+
+    /// Split current window horizontally
+    pub fn split_window(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        if editor.split_window() {
+            Ok(CommandStatus::Success)
+        } else {
+            editor.display.set_message("Window too small to split");
+            Ok(CommandStatus::Failure)
+        }
+    }
+
+    /// Delete all windows except current
+    pub fn delete_other_windows(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.delete_other_windows();
+        Ok(CommandStatus::Success)
+    }
+
+    /// Delete current window
+    pub fn delete_window(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        if editor.delete_window() {
+            Ok(CommandStatus::Success)
+        } else {
+            editor.display.set_message("Can't delete the only window");
+            Ok(CommandStatus::Failure)
+        }
+    }
+
+    /// Switch to other window
+    pub fn other_window(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.other_window();
+        Ok(CommandStatus::Success)
+    }
+
     /// Copy region (without deleting)
     pub fn copy_region(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
         let region = match get_region(editor) {
@@ -1033,6 +1122,23 @@ pub mod commands {
                     .set_message(&format!("Error writing file: {}", e));
                 Ok(CommandStatus::Failure)
             }
+        }
+    }
+
+    /// Undo the last edit operation
+    pub fn undo(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        // Add boundary before undoing so consecutive undos work correctly
+        editor.current_buffer_mut().add_undo_boundary();
+
+        if let Some((line, col)) = editor.current_buffer_mut().undo() {
+            // Move cursor to the undo position
+            editor.current_window_mut().set_cursor(line, col);
+            editor.ensure_cursor_visible();
+            editor.display.set_message("Undo!");
+            Ok(CommandStatus::Success)
+        } else {
+            editor.display.set_message("Nothing to undo");
+            Ok(CommandStatus::Failure)
         }
     }
 }

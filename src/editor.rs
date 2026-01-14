@@ -38,6 +38,49 @@ pub struct EditorState {
     pub quote_pending: bool,
     /// Incremental search state
     pub search: SearchState,
+    /// Minibuffer prompt state
+    pub prompt: PromptState,
+    /// Query-replace state
+    pub query_replace: QueryReplaceState,
+}
+
+/// What action to perform when prompt completes
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PromptAction {
+    None,
+    FindFile,
+    SwitchBuffer,
+    KillBuffer,
+    GotoLine,
+    QueryReplaceSearch,   // First prompt: enter search string
+    QueryReplaceReplace,  // Second prompt: enter replacement string
+}
+
+/// Minibuffer prompt state
+#[derive(Debug, Clone)]
+pub struct PromptState {
+    /// Whether prompt is active
+    pub active: bool,
+    /// The prompt string (e.g., "Find file: ")
+    pub prompt: String,
+    /// Current input
+    pub input: String,
+    /// What to do when complete
+    pub action: PromptAction,
+    /// Default value (shown in prompt)
+    pub default: Option<String>,
+}
+
+impl Default for PromptState {
+    fn default() -> Self {
+        Self {
+            active: false,
+            prompt: String::new(),
+            input: String::new(),
+            action: PromptAction::None,
+            default: None,
+        }
+    }
 }
 
 /// Search direction
@@ -78,6 +121,33 @@ impl Default for SearchState {
     }
 }
 
+/// Query-replace state
+#[derive(Debug, Clone)]
+pub struct QueryReplaceState {
+    /// Whether query-replace is active
+    pub active: bool,
+    /// Search pattern
+    pub search: String,
+    /// Replacement string
+    pub replace: String,
+    /// Replace all remaining without prompting
+    pub replace_all: bool,
+    /// Number of replacements made
+    pub count: usize,
+}
+
+impl Default for QueryReplaceState {
+    fn default() -> Self {
+        Self {
+            active: false,
+            search: String::new(),
+            replace: String::new(),
+            replace_all: false,
+            count: 0,
+        }
+    }
+}
+
 impl EditorState {
     /// Create a new editor state
     pub fn new(terminal: Terminal) -> Self {
@@ -104,6 +174,8 @@ impl EditorState {
             last_was_kill: false,
             quote_pending: false,
             search: SearchState::default(),
+            prompt: PromptState::default(),
+            query_replace: QueryReplaceState::default(),
         }
     }
 
@@ -163,8 +235,15 @@ impl EditorState {
             // Translate key event
             if let Some(key) = self.input.translate_key(key_event) {
                 self.handle_key(key)?;
+            } else if self.input.is_pending() {
+                // Show visual feedback that we're waiting for continuation key
+                if self.input.is_ctlx_pending() {
+                    self.display.set_message("C-x -");
+                } else if self.input.is_meta_pending() {
+                    self.display.set_message("ESC -");
+                }
             }
-            // If None, we're waiting for continuation (C-x or ESC sequence)
+            // Debug: if key event was ignored (not Press), we just continue the loop
         }
 
         Ok(())
@@ -172,9 +251,19 @@ impl EditorState {
 
     /// Handle a key press
     fn handle_key(&mut self, key: Key) -> Result<()> {
+        // Handle prompt mode
+        if self.prompt.active {
+            return self.handle_prompt_key(key);
+        }
+
         // Handle search mode
         if self.search.active {
             return self.handle_search_key(key);
+        }
+
+        // Handle query-replace mode
+        if self.query_replace.active {
+            return self.handle_query_replace_key(key);
         }
 
         // Clear any previous message
@@ -669,5 +758,435 @@ impl EditorState {
         } else {
             0
         }
+    }
+
+    /// Start a minibuffer prompt
+    pub fn start_prompt(&mut self, prompt: &str, action: PromptAction, default: Option<String>) {
+        self.prompt.active = true;
+        self.prompt.prompt = prompt.to_string();
+        self.prompt.input.clear();
+        self.prompt.action = action;
+        self.prompt.default = default;
+        self.update_prompt_display();
+    }
+
+    /// Update the prompt display
+    fn update_prompt_display(&mut self) {
+        let display = if let Some(ref def) = self.prompt.default {
+            if self.prompt.input.is_empty() {
+                format!("{} (default {}): ", self.prompt.prompt, def)
+            } else {
+                format!("{}: {}", self.prompt.prompt, self.prompt.input)
+            }
+        } else {
+            format!("{}: {}", self.prompt.prompt, self.prompt.input)
+        };
+        self.display.set_message(&display);
+    }
+
+    /// Handle key press during prompt mode
+    fn handle_prompt_key(&mut self, key: Key) -> Result<()> {
+        // C-g aborts
+        if key == Key::ctrl('g') {
+            self.prompt.active = false;
+            self.prompt.action = PromptAction::None;
+            self.display.set_message("Quit");
+            return Ok(());
+        }
+
+        // Enter completes
+        if key == Key::ctrl('m') {
+            let input = if self.prompt.input.is_empty() {
+                self.prompt.default.clone().unwrap_or_default()
+            } else {
+                self.prompt.input.clone()
+            };
+            let action = self.prompt.action.clone();
+            self.prompt.active = false;
+            self.display.clear_message();
+            return self.complete_prompt(action, input);
+        }
+
+        // Backspace
+        if key == Key(0x7f) || key == Key::ctrl('h') {
+            self.prompt.input.pop();
+            self.update_prompt_display();
+            return Ok(());
+        }
+
+        // Printable character
+        if key.is_self_insert() {
+            if let Some(ch) = key.base_char() {
+                self.prompt.input.push(ch);
+                self.update_prompt_display();
+            }
+            return Ok(());
+        }
+
+        // Unknown key - beep
+        let _ = self.terminal.beep();
+        Ok(())
+    }
+
+    /// Complete a prompt action
+    fn complete_prompt(&mut self, action: PromptAction, input: String) -> Result<()> {
+        match action {
+            PromptAction::FindFile => {
+                if input.is_empty() {
+                    self.display.set_message("No file name");
+                    return Ok(());
+                }
+                let path = PathBuf::from(&input);
+                match self.open_file(&path) {
+                    Ok(()) => {
+                        self.display.set_message(&format!("Opened {}", input));
+                    }
+                    Err(e) => {
+                        // File doesn't exist - create new buffer with that name
+                        let mut buffer = Buffer::new(&input);
+                        buffer.set_filename(path);
+                        self.buffers.push(buffer);
+                        let buf_idx = self.buffers.len() - 1;
+                        if let Some(window) = self.windows.get_mut(self.current_window) {
+                            window.set_buffer_idx(buf_idx);
+                        }
+                        self.display.set_message(&format!("(New file) {}", input));
+                    }
+                }
+            }
+            PromptAction::SwitchBuffer => {
+                if input.is_empty() {
+                    return Ok(());
+                }
+                // Find buffer by name
+                if let Some(idx) = self.buffers.iter().position(|b| b.name() == input) {
+                    if let Some(window) = self.windows.get_mut(self.current_window) {
+                        window.set_buffer_idx(idx);
+                        window.set_cursor(0, 0);
+                    }
+                    self.display.force_redraw();
+                } else {
+                    self.display.set_message(&format!("No buffer named {}", input));
+                }
+            }
+            PromptAction::KillBuffer => {
+                if input.is_empty() {
+                    return Ok(());
+                }
+                // Find buffer by name
+                if let Some(idx) = self.buffers.iter().position(|b| b.name() == input) {
+                    if self.buffers.len() <= 1 {
+                        self.display.set_message("Can't kill the only buffer");
+                        return Ok(());
+                    }
+                    // Check if modified
+                    if self.buffers[idx].is_modified() {
+                        self.display.set_message(&format!("Buffer {} modified; kill anyway? (not implemented)", input));
+                        return Ok(());
+                    }
+                    self.buffers.remove(idx);
+                    // Update window buffer indices
+                    for window in &mut self.windows {
+                        let win_buf = window.buffer_idx();
+                        if win_buf == idx {
+                            window.set_buffer_idx(0);
+                            window.set_cursor(0, 0);
+                        } else if win_buf > idx {
+                            window.set_buffer_idx(win_buf - 1);
+                        }
+                    }
+                    self.display.force_redraw();
+                    self.display.set_message(&format!("Killed buffer {}", input));
+                } else {
+                    self.display.set_message(&format!("No buffer named {}", input));
+                }
+            }
+            PromptAction::GotoLine => {
+                if let Ok(line_num) = input.parse::<usize>() {
+                    let target = line_num.saturating_sub(1); // Convert to 0-indexed
+                    let max_line = self.current_buffer().line_count().saturating_sub(1);
+                    let target = target.min(max_line);
+                    self.current_window_mut().set_cursor(target, 0);
+                    self.ensure_cursor_visible();
+                } else {
+                    self.display.set_message("Invalid line number");
+                }
+            }
+            PromptAction::QueryReplaceSearch => {
+                if input.is_empty() {
+                    self.display.set_message("No search string");
+                    return Ok(());
+                }
+                // Store search string and prompt for replacement
+                self.query_replace.search = input.clone();
+                self.prompt.active = true;
+                self.prompt.prompt = format!("Query replace {} with: ", input);
+                self.prompt.input.clear();
+                self.prompt.action = PromptAction::QueryReplaceReplace;
+                self.prompt.default = None;
+                self.update_prompt_display();
+            }
+            PromptAction::QueryReplaceReplace => {
+                // Store replacement and start query-replace mode
+                self.query_replace.replace = input;
+                self.query_replace.active = true;
+                self.query_replace.replace_all = false;
+                self.query_replace.count = 0;
+                // Find first match
+                self.query_replace_next();
+            }
+            PromptAction::None => {}
+        }
+        Ok(())
+    }
+
+    /// Get list of buffer names for completion
+    pub fn buffer_names(&self) -> Vec<&str> {
+        self.buffers.iter().map(|b| b.name()).collect()
+    }
+
+    /// Split current window horizontally
+    pub fn split_window(&mut self) -> bool {
+        let current_height = self.current_window().height();
+
+        // Need at least 3 rows to split (1 for each window + mode line)
+        if current_height < 4 {
+            return false;
+        }
+
+        let top_row = self.current_window().top_row();
+        let buffer_idx = self.current_window().buffer_idx();
+        let cursor_line = self.current_window().cursor_line();
+        let cursor_col = self.current_window().cursor_col();
+
+        // Calculate new heights
+        let top_height = current_height / 2;
+        let bottom_height = current_height - top_height - 1; // -1 for mode line
+
+        // Update current window (becomes top)
+        self.current_window_mut().set_height(top_height);
+
+        // Create new window (bottom), showing same buffer
+        let mut new_window = Window::new(buffer_idx, top_row + top_height + 1, bottom_height);
+        new_window.set_cursor(cursor_line, cursor_col);
+        new_window.ensure_cursor_visible();
+
+        // Insert new window after current
+        let insert_pos = self.current_window + 1;
+        self.windows.insert(insert_pos, new_window);
+
+        // Update positions of windows below the split
+        self.recalculate_window_positions();
+
+        self.display.force_redraw();
+        true
+    }
+
+    /// Delete current window
+    pub fn delete_window(&mut self) -> bool {
+        if self.windows.len() <= 1 {
+            return false;
+        }
+
+        let deleted_height = self.current_window().height() + 1; // +1 for mode line
+        let deleted_idx = self.current_window;
+
+        // Give space to adjacent window
+        if deleted_idx > 0 {
+            // Give to window above
+            let above_height = self.windows[deleted_idx - 1].height();
+            self.windows[deleted_idx - 1].set_height(above_height + deleted_height);
+        } else if deleted_idx + 1 < self.windows.len() {
+            // Give to window below
+            let below_height = self.windows[deleted_idx + 1].height();
+            self.windows[deleted_idx + 1].set_height(below_height + deleted_height);
+        }
+
+        self.windows.remove(deleted_idx);
+
+        // Update current window index
+        if self.current_window >= self.windows.len() {
+            self.current_window = self.windows.len() - 1;
+        }
+
+        self.recalculate_window_positions();
+        self.display.force_redraw();
+        true
+    }
+
+    /// Delete all windows except current
+    pub fn delete_other_windows(&mut self) -> bool {
+        if self.windows.len() <= 1 {
+            return false;
+        }
+
+        let buffer_idx = self.current_window().buffer_idx();
+        let cursor_line = self.current_window().cursor_line();
+        let cursor_col = self.current_window().cursor_col();
+        let top_line = self.current_window().top_line();
+
+        // Calculate total height available
+        let total_height = self.terminal.rows().saturating_sub(2); // -2 for mode line and minibuffer
+
+        // Create single window
+        let mut window = Window::new(buffer_idx, 0, total_height);
+        window.set_cursor(cursor_line, cursor_col);
+        window.set_top_line(top_line);
+
+        self.windows = vec![window];
+        self.current_window = 0;
+
+        self.display.force_redraw();
+        true
+    }
+
+    /// Switch to other window
+    pub fn other_window(&mut self) {
+        if self.windows.len() > 1 {
+            self.current_window = (self.current_window + 1) % self.windows.len();
+        }
+    }
+
+    /// Recalculate window positions after split/delete
+    fn recalculate_window_positions(&mut self) {
+        let mut current_row: u16 = 0;
+        for window in &mut self.windows {
+            window.set_top_row(current_row);
+            current_row += window.height() + 1; // +1 for mode line
+        }
+    }
+
+    /// Get number of windows
+    pub fn window_count(&self) -> usize {
+        self.windows.len()
+    }
+
+    /// Find and move to next match for query-replace
+    pub fn query_replace_next(&mut self) -> bool {
+        if self.query_replace.search.is_empty() {
+            return false;
+        }
+
+        let start_line = self.current_window().cursor_line();
+        let start_col = self.current_window().cursor_col();
+        let line_count = self.current_buffer().line_count();
+        let pattern = self.query_replace.search.clone();
+
+        // Search forward from current position
+        for line_idx in start_line..line_count {
+            if let Some(line) = self.current_buffer().line(line_idx) {
+                let text = line.text();
+                let search_start = if line_idx == start_line {
+                    start_col
+                } else {
+                    0
+                };
+
+                if search_start < text.len() {
+                    if let Some(pos) = text[search_start..].find(&pattern) {
+                        let match_col = search_start + pos;
+                        self.current_window_mut().set_cursor(line_idx, match_col);
+                        self.ensure_cursor_visible();
+
+                        // Show prompt for this match
+                        if self.query_replace.replace_all {
+                            // Auto-replace without prompting
+                            self.query_replace_do_replace();
+                            return self.query_replace_next();
+                        } else {
+                            let search = &self.query_replace.search;
+                            let replace = &self.query_replace.replace;
+                            self.display.set_message(&format!(
+                                "Query replacing {} with {}: (y/n/!/q/?)",
+                                search, replace
+                            ));
+                        }
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // No more matches - wrap to beginning? For now, just end
+        let count = self.query_replace.count;
+        self.query_replace.active = false;
+        self.display.set_message(&format!("Replaced {} occurrences", count));
+        false
+    }
+
+    /// Perform replacement at current cursor position
+    pub fn query_replace_do_replace(&mut self) {
+        let line_idx = self.current_window().cursor_line();
+        let col = self.current_window().cursor_col();
+        let search_len = self.query_replace.search.len();
+        let replace_str = self.query_replace.replace.clone();
+
+        if let Some(line) = self.current_buffer_mut().line_mut(line_idx) {
+            // Delete the search string
+            line.delete_range(col, col + search_len);
+            // Insert the replacement
+            for (i, ch) in replace_str.chars().enumerate() {
+                line.insert_char(col + i, ch);
+            }
+        }
+
+        self.current_buffer_mut().set_modified(true);
+        self.query_replace.count += 1;
+
+        // Move cursor past the replacement
+        let new_col = col + replace_str.len();
+        self.current_window_mut().set_cursor(line_idx, new_col);
+    }
+
+    /// Handle key input during query-replace mode
+    pub fn handle_query_replace_key(&mut self, key: Key) -> Result<()> {
+        match key.base_char() {
+            Some('y') | Some(' ') => {
+                // Replace and continue
+                self.query_replace_do_replace();
+                self.query_replace_next();
+            }
+            Some('n') => {
+                // Skip and continue
+                let line = self.current_window().cursor_line();
+                let col = self.current_window().cursor_col();
+                let search_len = self.query_replace.search.len();
+                self.current_window_mut().set_cursor(line, col + search_len);
+                self.query_replace_next();
+            }
+            Some('!') => {
+                // Replace all remaining
+                self.query_replace.replace_all = true;
+                self.query_replace_do_replace();
+                self.query_replace_next();
+            }
+            Some('q') | Some('\r') => {
+                // Quit
+                let count = self.query_replace.count;
+                self.query_replace.active = false;
+                self.display.set_message(&format!("Replaced {} occurrences", count));
+            }
+            Some('.') => {
+                // Replace this one and quit
+                self.query_replace_do_replace();
+                let count = self.query_replace.count;
+                self.query_replace.active = false;
+                self.display.set_message(&format!("Replaced {} occurrences", count));
+            }
+            Some('?') => {
+                // Show help
+                self.display.set_message("y:replace n:skip !:all q:quit .:replace+quit");
+            }
+            _ => {
+                // Check for C-g abort
+                if key == Key::ctrl('g') {
+                    self.query_replace.active = false;
+                    self.display.set_message("Quit");
+                } else {
+                    self.terminal.beep()?;
+                }
+            }
+        }
+        Ok(())
     }
 }

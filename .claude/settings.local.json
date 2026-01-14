@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(cargo init:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(cargo build:*)"
     ]
   }
 }

@@ -1,6 +1,6 @@
 //! Input handling - key reading and translation
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 /// Key modifier flags (matching original C version)
 pub mod key_flags {
@@ -122,11 +122,27 @@ impl InputState {
         self.ctlx_pending || self.meta_pending
     }
 
+    /// Check if waiting for C-x continuation
+    pub fn is_ctlx_pending(&self) -> bool {
+        self.ctlx_pending
+    }
+
+    /// Check if waiting for Meta/ESC continuation
+    pub fn is_meta_pending(&self) -> bool {
+        self.meta_pending
+    }
+
     /// Translate a crossterm KeyEvent to our Key representation
     pub fn translate_key(&mut self, event: KeyEvent) -> Option<Key> {
         let KeyEvent {
-            code, modifiers, ..
+            code, modifiers, kind, ..
         } = event;
+
+        // Only process key press events, ignore release and repeat
+        // This is critical on Windows where crossterm sends all event types
+        if kind != KeyEventKind::Press {
+            return None;
+        }
 
         // Handle based on current state
         if self.meta_pending {
