@@ -8,7 +8,7 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 
 ## Progress Summary
 
-**Status: ~98% Complete** - A fully functional text editor with comprehensive Emacs keybindings.
+**Status: ~99% Complete** - A fully functional text editor with comprehensive Emacs keybindings.
 
 ### What Works
 
@@ -24,10 +24,9 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 | **Windows** | Split (C-x 2), delete (C-x 0/1), switch (C-x o) |
 | **Undo** | Undo (C-/ or C-_) with operation grouping |
 | **Macros** | Record (C-x (), stop (C-x )), execute (C-x e) |
+| **Prefix** | Universal argument (C-u) for repeat counts |
 
 ### Potential Future Enhancements
-
-- Numeric argument prefix (C-u)
 - Named macros and macro persistence
 - Rectangle operations
 - Customizable key bindings file
@@ -54,9 +53,10 @@ M-%    query replace     C-x 0  delete window    M-c    capitalize word
                                                  C-x C-l downcase region
 
 Macros:              Mark/Region:          Other:
-C-x (  start recording   C-space  set mark       C-g      abort
-C-x )  stop recording    C-x C-x  exchange       C-l      refresh
-C-x e  execute macro                             C-/ C-_  undo
+C-x (  start recording   C-space  set mark       C-u      prefix arg
+C-x )  stop recording    C-x C-x  exchange       C-g      abort
+C-x e  execute macro                             C-l      refresh
+                                                 C-/ C-_  undo
 ```
 
 ## Build Commands

@@ -85,6 +85,7 @@ fn print_usage() {
     println!("  M-v, PageUp    Scroll up one page");
     println!("  M-<            Move to beginning of buffer");
     println!("  M->            Move to end of buffer");
+    println!("  C-u            Universal argument (repeat count)");
     println!("  C-l            Redraw screen");
     println!("  C-g            Abort current operation");
     println!("  C-x C-c        Quit");

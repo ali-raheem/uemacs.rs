@@ -44,6 +44,19 @@ pub struct EditorState {
     pub query_replace: QueryReplaceState,
     /// Keyboard macro state
     pub macro_state: MacroState,
+    /// Universal argument (C-u prefix)
+    pub prefix_arg: PrefixArg,
+}
+
+/// Universal argument state for C-u prefix
+#[derive(Debug, Clone, Default)]
+pub struct PrefixArg {
+    /// Whether a prefix argument is active
+    pub active: bool,
+    /// The numeric value (None = just C-u with no digits)
+    pub value: Option<i32>,
+    /// Number of times C-u was pressed (for C-u C-u = 16, etc.)
+    pub multiplier: i32,
 }
 
 /// What action to perform when prompt completes
@@ -191,6 +204,7 @@ impl EditorState {
             prompt: PromptState::default(),
             query_replace: QueryReplaceState::default(),
             macro_state: MacroState::default(),
+            prefix_arg: PrefixArg::default(),
         }
     }
 
@@ -307,12 +321,10 @@ impl EditorState {
         // Note: macro control keys (C-x (, C-x ), C-x e) will exclude themselves
         let should_record = self.macro_state.recording && !self.macro_state.playing;
 
-        // Clear any previous message
-        self.display.clear_message();
-
         // Handle quote mode - insert next character literally
         if self.quote_pending {
             self.quote_pending = false;
+            self.prefix_arg = PrefixArg::default(); // Clear prefix on quote
             if let Some(ch) = key.base_char() {
                 if ch == '\r' || ch == '\n' {
                     // Insert newline
@@ -328,10 +340,67 @@ impl EditorState {
             return Ok(());
         }
 
+        // Handle C-u (universal argument)
+        if key == Key::ctrl('u') {
+            if self.prefix_arg.active {
+                // Another C-u multiplies by 4
+                if self.prefix_arg.value.is_none() {
+                    self.prefix_arg.multiplier *= 4;
+                }
+            } else {
+                // Start prefix arg
+                self.prefix_arg.active = true;
+                self.prefix_arg.multiplier = 4;
+                self.prefix_arg.value = None;
+            }
+            self.show_prefix_arg();
+            return Ok(());
+        }
+
+        // Handle digits during prefix arg
+        if self.prefix_arg.active {
+            if let Some(ch) = key.base_char() {
+                if ch.is_ascii_digit() {
+                    let digit = ch.to_digit(10).unwrap() as i32;
+                    self.prefix_arg.value = Some(
+                        self.prefix_arg.value.unwrap_or(0) * 10 + digit
+                    );
+                    // Clear multiplier when explicit digits are entered
+                    self.prefix_arg.multiplier = 1;
+                    self.show_prefix_arg();
+                    return Ok(());
+                }
+                // Negative argument with -
+                if ch == '-' && self.prefix_arg.value.is_none() {
+                    self.prefix_arg.value = Some(0);
+                    self.prefix_arg.multiplier = -self.prefix_arg.multiplier.abs();
+                    self.show_prefix_arg();
+                    return Ok(());
+                }
+            }
+        }
+
+        // Clear any previous message (but not if we're showing prefix)
+        if !self.prefix_arg.active {
+            self.display.clear_message();
+        }
+
+        // Get the prefix argument values
+        let (has_arg, arg_value) = if self.prefix_arg.active {
+            let value = self.prefix_arg.value.unwrap_or(1) * self.prefix_arg.multiplier;
+            (true, value)
+        } else {
+            (false, 1)
+        };
+
+        // Clear prefix arg before executing (so command sees clean state)
+        self.prefix_arg = PrefixArg::default();
+        self.display.clear_message();
+
         // Look up command
         if let Some(cmd) = self.keytab.lookup(key) {
-            // Execute command with no numeric argument
-            match cmd(self, false, 1)? {
+            // Execute command with prefix argument
+            match cmd(self, has_arg, arg_value)? {
                 CommandStatus::Success => {
                     // Record successful command keys for macro
                     // (macro control commands will clear this themselves)
@@ -348,9 +417,12 @@ impl EditorState {
                 }
             }
         } else if key.is_self_insert() {
-            // Self-insert character
+            // Self-insert character (possibly multiple times with prefix)
             if let Some(ch) = key.base_char() {
-                self.insert_char(ch);
+                let count = if has_arg { arg_value.max(1) } else { 1 };
+                for _ in 0..count {
+                    self.insert_char(ch);
+                }
             }
             // Record self-insert keys for macro
             if should_record {
@@ -686,6 +758,16 @@ impl EditorState {
         self.current_window_mut().set_cursor(para_start, 0);
         self.ensure_cursor_visible();
         self.display.set_message(&format!("Filled paragraph ({} lines)", new_lines.len()));
+    }
+
+    /// Show the current prefix argument in the message line
+    fn show_prefix_arg(&mut self) {
+        let msg = if let Some(value) = self.prefix_arg.value {
+            format!("C-u {}", value * self.prefix_arg.multiplier)
+        } else {
+            format!("C-u {}-", self.prefix_arg.multiplier)
+        };
+        self.display.set_message(&msg);
     }
 
     /// Force a full redraw

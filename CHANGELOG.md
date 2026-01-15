@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Universal Argument (C-u)**
+  - `C-u` - Prefix argument (default 4)
+  - `C-u C-u` - Multiply by 4 (16)
+  - `C-u 5` - Explicit numeric argument
+  - `C-u 1 2` - Multi-digit argument (12)
+  - Works with all commands (e.g., `C-u 10 C-f` moves 10 characters)
+  - Works with self-insert (e.g., `C-u 5 a` inserts "aaaaa")
+
 - **Case Operations**
   - `M-u` - Upcase word at cursor
   - `M-l` - Downcase word at cursor
