@@ -18,10 +18,10 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 | **Editing** | Insert, delete (C-d, Backspace), kill line (C-k), yank (C-y), kill word (M-d), transpose (C-t), quote (C-q), fill paragraph (M-q), just-one-space (M-SPC), delete-horizontal-space (M-\), delete-blank-lines (C-x C-o), tab-to-tab-stop (M-i) |
 | **Case** | Upcase word (M-u), downcase word (M-l), capitalize (M-c), upcase region (C-x C-u), downcase region (C-x C-l) |
 | **Mark/Region** | Set mark (C-space), kill region (C-w), copy region (M-w), exchange point/mark (C-x C-x) |
-| **Search** | Incremental search (C-s, C-r), query replace (M-%) |
+| **Search** | Incremental search (C-s, C-r), query replace (M-%), replace-string (M-r), hunt forward/backward (M-s, M-S) |
 | **Files** | Open (C-x C-f), save (C-x C-s), quit (C-x C-c) |
-| **Buffers** | Switch (C-x b), list (C-x C-b), kill (C-x k), goto line (M-g), shell command (M-!), cursor position (C-x =), describe-key (M-?) |
-| **Windows** | Split (C-x 2), delete (C-x 0/1), switch (C-x o) |
+| **Buffers** | Switch (C-x b), list (C-x C-b), kill (C-x k), next/prev (C-x n/p), goto line (M-g), shell command (M-!), cursor position (C-x =), describe-key (M-?) |
+| **Windows** | Split (C-x 2), delete (C-x 0/1), switch (C-x o), enlarge (C-x ^), shrink (C-x v) |
 | **Undo** | Undo (C-/ or C-_) with operation grouping |
 | **Macros** | Record (C-x (), stop (C-x )), execute (C-x e) |
 | **Prefix** | Universal argument (C-u) for repeat counts |
@@ -52,14 +52,18 @@ Search:              Windows:              Case:
 C-s    search fwd        C-x 2  split            M-u    upcase word
 C-r    search back       C-x 1  delete others    M-l    downcase word
 M-%    query replace     C-x 0  delete window    M-c    capitalize word
-                         C-x o  other window     C-x C-u upcase region
-                                                 C-x C-l downcase region
+M-r    replace string    C-x o  other window     C-x C-u upcase region
+M-s    hunt forward      C-x ^  enlarge window   C-x C-l downcase region
+M-S    hunt backward     C-x v  shrink window
 
-Macros:              Mark/Region:          Other:
-C-x (  start recording   C-space  set mark       C-u      prefix arg
-C-x )  stop recording    C-x C-x  exchange       C-g      abort
-C-x e  execute macro                             C-l      refresh
-                                                 C-/ C-_  undo
+Macros:              Mark/Region:          Buffers:
+C-x (  start recording   C-space  set mark       C-x n  next buffer
+C-x )  stop recording    C-x C-x  exchange       C-x p  prev buffer
+C-x e  execute macro
+
+Other:
+C-u      prefix arg      C-g      abort          C-l      refresh
+C-/ C-_  undo
 ```
 
 ## Build Commands

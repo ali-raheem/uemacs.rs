@@ -69,6 +69,8 @@ pub enum PromptAction {
     GotoLine,
     QueryReplaceSearch,   // First prompt: enter search string
     QueryReplaceReplace,  // Second prompt: enter replacement string
+    ReplaceStringSearch,  // Non-interactive replace: enter search string
+    ReplaceStringReplace, // Non-interactive replace: enter replacement string
     ShellCommand,         // Execute shell command
 }
 
@@ -869,6 +871,88 @@ impl EditorState {
         self.update_search_prompt();
     }
 
+    /// Hunt - repeat last search in specified direction without prompting
+    pub fn hunt(&mut self, direction: SearchDirection) -> bool {
+        if self.search.pattern.is_empty() {
+            self.display.set_message("No previous search pattern");
+            return false;
+        }
+
+        let pattern = self.search.pattern.clone();
+        let start_line = self.current_window().cursor_line();
+        let start_col = self.current_window().cursor_col();
+        let line_count = self.current_buffer().line_count();
+
+        match direction {
+            SearchDirection::Forward => {
+                // Search forward from current position (skip current match)
+                let search_start_col = start_col + 1;
+                for line_idx in start_line..line_count {
+                    if let Some(line) = self.current_buffer().line(line_idx) {
+                        let text = line.text();
+                        let col_start = if line_idx == start_line { search_start_col } else { 0 };
+                        if col_start < text.len() {
+                            if let Some(pos) = text[col_start..].find(&pattern) {
+                                let match_col = col_start + pos;
+                                self.current_window_mut().set_cursor(line_idx, match_col);
+                                self.ensure_cursor_visible();
+                                self.display.set_message(&format!("Found: {}", pattern));
+                                return true;
+                            }
+                        }
+                    }
+                }
+                // Wrap around to beginning
+                for line_idx in 0..=start_line {
+                    if let Some(line) = self.current_buffer().line(line_idx) {
+                        let text = line.text();
+                        let col_end = if line_idx == start_line { start_col } else { text.len() };
+                        if let Some(pos) = text[..col_end].find(&pattern) {
+                            self.current_window_mut().set_cursor(line_idx, pos);
+                            self.ensure_cursor_visible();
+                            self.display.set_message(&format!("Wrapped: {}", pattern));
+                            return true;
+                        }
+                    }
+                }
+            }
+            SearchDirection::Backward => {
+                // Search backward from current position
+                for line_idx in (0..=start_line).rev() {
+                    if let Some(line) = self.current_buffer().line(line_idx) {
+                        let text = line.text();
+                        let col_end = if line_idx == start_line { start_col } else { text.len() };
+                        if let Some(pos) = text[..col_end].rfind(&pattern) {
+                            self.current_window_mut().set_cursor(line_idx, pos);
+                            self.ensure_cursor_visible();
+                            self.display.set_message(&format!("Found: {}", pattern));
+                            return true;
+                        }
+                    }
+                }
+                // Wrap around to end
+                for line_idx in (start_line..line_count).rev() {
+                    if let Some(line) = self.current_buffer().line(line_idx) {
+                        let text = line.text();
+                        let col_start = if line_idx == start_line { start_col + 1 } else { 0 };
+                        if col_start < text.len() {
+                            if let Some(pos) = text[col_start..].rfind(&pattern) {
+                                let match_col = col_start + pos;
+                                self.current_window_mut().set_cursor(line_idx, match_col);
+                                self.ensure_cursor_visible();
+                                self.display.set_message(&format!("Wrapped: {}", pattern));
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        self.display.set_message(&format!("Not found: {}", pattern));
+        false
+    }
+
     /// Update search prompt in minibuffer
     fn update_search_prompt(&mut self) {
         let dir_str = match self.search.direction {
@@ -1267,6 +1351,25 @@ impl EditorState {
                 // Find first match
                 self.query_replace_next();
             }
+            PromptAction::ReplaceStringSearch => {
+                if input.is_empty() {
+                    self.display.set_message("No search string");
+                    return Ok(());
+                }
+                // Store search string and prompt for replacement
+                self.query_replace.search = input.clone();
+                self.prompt.active = true;
+                self.prompt.prompt = format!("Replace {} with: ", input);
+                self.prompt.input.clear();
+                self.prompt.action = PromptAction::ReplaceStringReplace;
+                self.prompt.default = None;
+                self.update_prompt_display();
+            }
+            PromptAction::ReplaceStringReplace => {
+                // Perform all replacements without prompting
+                let count = self.replace_all_occurrences(&self.query_replace.search.clone(), &input);
+                self.display.set_message(&format!("Replaced {} occurrences", count));
+            }
             PromptAction::ShellCommand => {
                 if input.is_empty() {
                     return Ok(());
@@ -1399,6 +1502,67 @@ impl EditorState {
         self.windows.len()
     }
 
+    /// Enlarge current window by n lines (taking from adjacent window)
+    pub fn enlarge_window(&mut self, n: u16) -> bool {
+        if self.windows.len() < 2 {
+            return false;
+        }
+
+        // Find adjacent window to take space from (prefer below, else above)
+        let other_idx = if self.current_window + 1 < self.windows.len() {
+            self.current_window + 1
+        } else {
+            self.current_window - 1
+        };
+
+        let other_height = self.windows[other_idx].height();
+        if other_height <= n + 1 {
+            // Other window would become too small (need at least 2 lines)
+            return false;
+        }
+
+        // Adjust heights
+        let current_height = self.windows[self.current_window].height();
+        self.windows[self.current_window].set_height(current_height + n);
+        self.windows[other_idx].set_height(other_height - n);
+
+        self.recalculate_window_positions();
+        self.display.force_redraw();
+        true
+    }
+
+    /// Shrink current window by n lines (giving to adjacent window)
+    pub fn shrink_window(&mut self, n: u16) -> bool {
+        if self.windows.len() < 2 {
+            return false;
+        }
+
+        let current_height = self.windows[self.current_window].height();
+        if current_height <= n + 1 {
+            // Current window would become too small (need at least 2 lines)
+            return false;
+        }
+
+        // Find adjacent window to give space to (prefer below, else above)
+        let other_idx = if self.current_window + 1 < self.windows.len() {
+            self.current_window + 1
+        } else {
+            self.current_window - 1
+        };
+
+        // Adjust heights
+        let other_height = self.windows[other_idx].height();
+        self.windows[self.current_window].set_height(current_height - n);
+        self.windows[other_idx].set_height(other_height + n);
+
+        // Make sure cursor is still visible in current window
+        self.current_window_mut().ensure_cursor_visible();
+
+        self.recalculate_window_positions();
+        self.display.force_redraw();
+        true
+    }
+
     /// Find and move to next match for query-replace
     pub fn query_replace_next(&mut self) -> bool {
         if self.query_replace.search.is_empty() {
@@ -1529,6 +1693,50 @@ impl EditorState {
             }
         }
         Ok(())
+    }
+
+    /// Replace all occurrences of search with replace in current buffer (non-interactive)
+    pub fn replace_all_occurrences(&mut self, search: &str, replace: &str) -> usize {
+        if search.is_empty() {
+            return 0;
+        }
+
+        let mut count = 0;
+        let line_count = self.current_buffer().line_count();
+
+        // Process each line
+        for line_idx in 0..line_count {
+            loop {
+                // Find next occurrence in this line
+                let found = if let Some(line) = self.current_buffer().line(line_idx) {
+                    line.text().find(search)
+                } else {
+                    None
+                };
+
+                if let Some(col) = found {
+                    // Perform replacement
+                    if let Some(line) = self.current_buffer_mut().line_mut(line_idx) {
+                        let end_col = col + search.len();
+                        line.delete_range(col, end_col);
+                        let mut byte_offset = col;
+                        for ch in replace.chars() {
+                            line.insert_char(byte_offset, ch);
+                            byte_offset += ch.len_utf8();
+                        }
+                    }
+                    count += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if count > 0 {
+            self.current_buffer_mut().set_modified(true);
+        }
+
+        count
     }
 
     /// Create or update the buffer list and switch to it

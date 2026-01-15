@@ -155,13 +155,18 @@ impl KeyTable {
         // Search
         self.bind_named(Key::ctrl('s'), search_forward, "isearch-forward");
         self.bind_named(Key::ctrl('r'), search_backward, "isearch-backward");
+        self.bind_named(Key::meta('s'), hunt_forward, "hunt-forward");  // M-s
+        self.bind_named(Key::meta('S'), hunt_backward, "hunt-backward");  // M-S (Meta-Shift-s)
         self.bind_named(Key::meta('%'), query_replace, "query-replace");  // M-%
+        self.bind_named(Key::meta('r'), replace_string, "replace-string");  // M-r
 
         // Buffer operations
         self.bind_named(Key::ctlx_ctrl('f'), find_file, "find-file");
         self.bind_named(Key::ctlx('b'), switch_buffer, "switch-to-buffer");
         self.bind_named(Key::ctlx_ctrl('b'), list_buffers, "list-buffers");  // C-x C-b
         self.bind_named(Key::ctlx('k'), kill_buffer, "kill-buffer");
+        self.bind_named(Key::ctlx('n'), next_buffer, "next-buffer");  // C-x n
+        self.bind_named(Key::ctlx('p'), previous_buffer, "previous-buffer");  // C-x p
 
         // Go to line
         self.bind_named(Key::meta('g'), goto_line, "goto-line");
@@ -171,6 +176,8 @@ impl KeyTable {
         self.bind_named(Key::ctlx('1'), delete_other_windows, "delete-other-windows");
         self.bind_named(Key::ctlx('0'), delete_window, "delete-window");
         self.bind_named(Key::ctlx('o'), other_window, "other-window");
+        self.bind_named(Key::ctlx('^'), enlarge_window, "enlarge-window");  // C-x ^
+        self.bind_named(Key::ctlx('v'), shrink_window, "shrink-window");  // C-x v
 
         // Undo
         self.bind_named(Key::ctrl('/'), undo, "undo");  // C-/
@@ -1085,9 +1092,37 @@ pub mod commands {
         Ok(CommandStatus::Success)
     }
 
+    /// Hunt forward - repeat last search forward
+    pub fn hunt_forward(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        let count = n.max(1) as usize;
+        for _ in 0..count {
+            if !editor.hunt(crate::editor::SearchDirection::Forward) {
+                return Ok(CommandStatus::Failure);
+            }
+        }
+        Ok(CommandStatus::Success)
+    }
+
+    /// Hunt backward - repeat last search backward
+    pub fn hunt_backward(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        let count = n.max(1) as usize;
+        for _ in 0..count {
+            if !editor.hunt(crate::editor::SearchDirection::Backward) {
+                return Ok(CommandStatus::Failure);
+            }
+        }
+        Ok(CommandStatus::Success)
+    }
+
     /// Query replace (search and replace with confirmation)
     pub fn query_replace(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
         editor.start_prompt("Query replace", crate::editor::PromptAction::QueryReplaceSearch, None);
+        Ok(CommandStatus::Success)
+    }
+
+    /// Replace string (search and replace all without confirmation)
+    pub fn replace_string(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.start_prompt("Replace string", crate::editor::PromptAction::ReplaceStringSearch, None);
         Ok(CommandStatus::Success)
     }
 
@@ -1112,6 +1147,46 @@ pub mod commands {
     /// List all buffers
     pub fn list_buffers(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
         editor.list_buffers();
+        Ok(CommandStatus::Success)
+    }
+
+    /// Switch to next buffer in buffer list
+    pub fn next_buffer(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        let count = n.max(1) as usize;
+        let num_buffers = editor.buffers.len();
+        if num_buffers <= 1 {
+            editor.display.set_message("Only one buffer");
+            return Ok(CommandStatus::Success);
+        }
+
+        let current_buf = editor.current_window().buffer_idx();
+        let new_buf = (current_buf + count) % num_buffers;
+        editor.current_window_mut().set_buffer_idx(new_buf);
+        editor.current_window_mut().set_cursor(0, 0);
+        editor.display.force_redraw();
+
+        let name = editor.buffers[new_buf].name().to_string();
+        editor.display.set_message(&format!("Buffer: {}", name));
+        Ok(CommandStatus::Success)
+    }
+
+    /// Switch to previous buffer in buffer list
+    pub fn previous_buffer(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        let count = n.max(1) as usize;
+        let num_buffers = editor.buffers.len();
+        if num_buffers <= 1 {
+            editor.display.set_message("Only one buffer");
+            return Ok(CommandStatus::Success);
+        }
+
+        let current_buf = editor.current_window().buffer_idx();
+        let new_buf = (current_buf + num_buffers - (count % num_buffers)) % num_buffers;
+        editor.current_window_mut().set_buffer_idx(new_buf);
+        editor.current_window_mut().set_cursor(0, 0);
+        editor.display.force_redraw();
+
+        let name = editor.buffers[new_buf].name().to_string();
+        editor.display.set_message(&format!("Buffer: {}", name));
         Ok(CommandStatus::Success)
     }
 
@@ -1165,6 +1240,28 @@ pub mod commands {
     pub fn other_window(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
         editor.other_window();
         Ok(CommandStatus::Success)
+    }
+
+    /// Enlarge current window
+    pub fn enlarge_window(editor: &mut EditorState, f: bool, n: i32) -> Result<CommandStatus> {
+        let lines = if f { n.max(1) as u16 } else { 1 };
+        if editor.enlarge_window(lines) {
+            Ok(CommandStatus::Success)
+        } else {
+            editor.display.set_message("Can't enlarge window");
+            Ok(CommandStatus::Failure)
+        }
+    }
+
+    /// Shrink current window
+    pub fn shrink_window(editor: &mut EditorState, f: bool, n: i32) -> Result<CommandStatus> {
+        let lines = if f { n.max(1) as u16 } else { 1 };
+        if editor.shrink_window(lines) {
+            Ok(CommandStatus::Success)
+        } else {
+            editor.display.set_message("Can't shrink window");
+            Ok(CommandStatus::Failure)
+        }
     }
 
     /// Copy region (without deleting)

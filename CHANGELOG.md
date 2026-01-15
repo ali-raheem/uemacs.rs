@@ -33,6 +33,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `M-i` - Tab to tab stop (insert spaces to next tab stop)
   - `M-?` - Describe key (show what command a key is bound to)
 
+- **Search Enhancements**
+  - `M-r` - Replace string (non-interactive search and replace all)
+  - `M-s` - Hunt forward (repeat last search forward)
+  - `M-S` - Hunt backward (repeat last search backward)
+
+- **Buffer Operations**
+  - `C-x n` - Next buffer (cycle to next buffer)
+  - `C-x p` - Previous buffer (cycle to previous buffer)
+
+- **Window Operations**
+  - `C-x ^` - Enlarge window (increase height by 1 line)
+  - `C-x v` - Shrink window (decrease height by 1 line)
+
 - **UTF-8 Safety**
   - `safe_slice()`, `safe_slice_to()`, `safe_slice_from()` methods in Line struct
   - `char_to_byte()`, `byte_to_char()` conversion helpers
