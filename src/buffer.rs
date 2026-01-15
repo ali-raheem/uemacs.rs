@@ -334,6 +334,20 @@ impl Buffer {
         }
     }
 
+    /// Append a new empty line at the end of the buffer
+    pub fn append_line(&mut self) {
+        self.lines.push(Line::new());
+        self.modified = true;
+    }
+
+    /// Insert a new empty line at the given index
+    pub fn insert_line_at(&mut self, line_idx: usize) {
+        if line_idx <= self.lines.len() {
+            self.lines.insert(line_idx, Line::new());
+            self.modified = true;
+        }
+    }
+
     /// Kill from position to end of line, returns killed text
     pub fn kill_to_eol(&mut self, line_idx: usize, byte_pos: usize) -> Option<String> {
         if let Some(line) = self.lines.get_mut(line_idx) {

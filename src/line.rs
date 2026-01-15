@@ -80,6 +80,11 @@ impl Line {
         self.text.push_str(s);
     }
 
+    /// Clear the line content
+    pub fn clear(&mut self) {
+        self.text.clear();
+    }
+
     /// Get byte position for a given column (display position)
     /// Returns None if column is beyond line end
     pub fn col_to_byte(&self, col: usize) -> Option<usize> {

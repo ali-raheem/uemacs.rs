@@ -125,6 +125,11 @@ impl KeyTable {
         // M-Backspace for backward kill word
         self.bind(Key(0x2000_007f), backward_kill_word); // META | 0x7f
 
+        // Paragraph operations
+        self.bind(Key::meta('{'), backward_paragraph);
+        self.bind(Key::meta('}'), forward_paragraph);
+        self.bind(Key::meta('q'), fill_paragraph);
+
         // Mark/Region operations
         self.bind(Key::ctrl(' '), set_mark);  // C-space
         self.bind(Key::ctrl('w'), kill_region);
@@ -153,6 +158,14 @@ impl KeyTable {
         // Undo
         self.bind(Key::ctrl('/'), undo);  // C-/
         self.bind(Key::ctrl('_'), undo);  // C-_ (same as C-/ in many terminals)
+
+        // Shell
+        self.bind(Key::meta('!'), shell_command);  // M-!
+
+        // Keyboard macros
+        self.bind(Key::ctlx('('), start_macro);    // C-x (
+        self.bind(Key::ctlx(')'), end_macro);      // C-x )
+        self.bind(Key::ctlx('e'), execute_macro);  // C-x e
     }
 }
 
@@ -859,6 +872,36 @@ pub mod commands {
         Ok(CommandStatus::Success)
     }
 
+    /// Move backward to start of paragraph
+    pub fn backward_paragraph(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        for _ in 0..n.abs().max(1) {
+            if n >= 0 {
+                editor.backward_paragraph();
+            } else {
+                editor.forward_paragraph();
+            }
+        }
+        Ok(CommandStatus::Success)
+    }
+
+    /// Move forward to end of paragraph
+    pub fn forward_paragraph(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        for _ in 0..n.abs().max(1) {
+            if n >= 0 {
+                editor.forward_paragraph();
+            } else {
+                editor.backward_paragraph();
+            }
+        }
+        Ok(CommandStatus::Success)
+    }
+
+    /// Fill (reflow) the current paragraph
+    pub fn fill_paragraph(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.fill_paragraph(72); // Default fill column
+        Ok(CommandStatus::Success)
+    }
+
     /// Set mark at current cursor position
     pub fn set_mark(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
         editor.current_window_mut().set_mark();
@@ -1019,6 +1062,12 @@ pub mod commands {
         Ok(CommandStatus::Success)
     }
 
+    /// Execute shell command
+    pub fn shell_command(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.start_prompt("Shell command", crate::editor::PromptAction::ShellCommand, None);
+        Ok(CommandStatus::Success)
+    }
+
     /// Kill buffer
     pub fn kill_buffer(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
         // Default to current buffer
@@ -1147,5 +1196,31 @@ pub mod commands {
             editor.display.set_message("Nothing to undo");
             Ok(CommandStatus::Failure)
         }
+    }
+
+    /// Start recording a keyboard macro (C-x ()
+    pub fn start_macro(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        // Remove this key from macro recording (it shouldn't be part of the macro)
+        editor.macro_state.keys.pop();
+        editor.start_macro();
+        Ok(CommandStatus::Success)
+    }
+
+    /// End recording a keyboard macro (C-x ))
+    pub fn end_macro(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        // Remove this key from macro recording (it shouldn't be part of the macro)
+        editor.macro_state.keys.pop();
+        editor.end_macro();
+        Ok(CommandStatus::Success)
+    }
+
+    /// Execute the keyboard macro (C-x e)
+    pub fn execute_macro(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        // Execute n times (or 1 if no argument)
+        let count = if n > 0 { n } else { 1 };
+        for _ in 0..count {
+            editor.execute_macro()?;
+        }
+        Ok(CommandStatus::Success)
     }
 }

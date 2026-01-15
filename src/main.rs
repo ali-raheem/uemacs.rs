@@ -55,8 +55,9 @@ fn run() -> Result<()> {
     // Open file if provided
     if args.len() > 1 && !args[1].starts_with('-') {
         let path = PathBuf::from(&args[1]);
-        if let Err(e) = editor.open_file(&path) {
-            editor.display.set_message(format!("Error: {}", e));
+        if let Err(_) = editor.open_file(&path) {
+            // File doesn't exist - create new buffer with that filename
+            editor.open_new_file(&path);
         }
     }
 

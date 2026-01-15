@@ -8,26 +8,28 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 
 ## Progress Summary
 
-**Status: ~85% Complete** - A fully functional text editor with most core Emacs keybindings.
+**Status: ~95% Complete** - A fully functional text editor with core Emacs keybindings.
 
 ### What Works
 
 | Category | Features |
 |----------|----------|
-| **Navigation** | Cursor (C-f/b/n/p, arrows), words (M-f/b), lines (C-a/e), pages (C-v, M-v), buffer (M-<, M->) |
-| **Editing** | Insert, delete (C-d, Backspace), kill line (C-k), yank (C-y), kill word (M-d), transpose (C-t), quote (C-q) |
+| **Navigation** | Cursor (C-f/b/n/p, arrows), words (M-f/b), lines (C-a/e), pages (C-v, M-v), buffer (M-<, M->), paragraphs (M-{ M-}) |
+| **Editing** | Insert, delete (C-d, Backspace), kill line (C-k), yank (C-y), kill word (M-d), transpose (C-t), quote (C-q), fill paragraph (M-q) |
 | **Mark/Region** | Set mark (C-space), kill region (C-w), copy region (M-w) |
 | **Search** | Incremental search (C-s, C-r), query replace (M-%) |
 | **Files** | Open (C-x C-f), save (C-x C-s), quit (C-x C-c) |
-| **Buffers** | Switch (C-x b), list (C-x C-b), kill (C-x k), goto line (M-g) |
+| **Buffers** | Switch (C-x b), list (C-x C-b), kill (C-x k), goto line (M-g), shell command (M-!) |
 | **Windows** | Split (C-x 2), delete (C-x 0/1), switch (C-x o) |
 | **Undo** | Undo (C-/ or C-_) with operation grouping |
+| **Macros** | Record (C-x (), stop (C-x )), execute (C-x e) |
 
-### What's Left (Priority Order)
+### Potential Future Enhancements
 
-1. **Paragraph operations** - M-{ M-} (movement), M-q (fill paragraph)
-2. **Shell command** - M-! (execute shell command)
-3. **Keyboard macros** - C-x ( start, C-x ) end, C-x e execute
+- Numeric argument prefix (C-u)
+- Named macros and macro persistence
+- Rectangle operations
+- Customizable key bindings file
 
 ### Key Bindings Quick Reference
 
@@ -46,6 +48,11 @@ C-s    search fwd        C-x 2  split            C-space  set mark
 C-r    search back       C-x 1  delete others    C-g      abort
 M-%    query replace     C-x 0  delete window    C-l      refresh
                          C-x o  other window     C-/ C-_  undo
+
+Macros:
+C-x (  start recording
+C-x )  stop recording
+C-x e  execute macro
 ```
 
 ## Build Commands

@@ -42,6 +42,8 @@ pub struct EditorState {
     pub prompt: PromptState,
     /// Query-replace state
     pub query_replace: QueryReplaceState,
+    /// Keyboard macro state
+    pub macro_state: MacroState,
 }
 
 /// What action to perform when prompt completes
@@ -54,6 +56,7 @@ pub enum PromptAction {
     GotoLine,
     QueryReplaceSearch,   // First prompt: enter search string
     QueryReplaceReplace,  // Second prompt: enter replacement string
+    ShellCommand,         // Execute shell command
 }
 
 /// Minibuffer prompt state
@@ -148,6 +151,17 @@ impl Default for QueryReplaceState {
     }
 }
 
+/// Keyboard macro state
+#[derive(Debug, Clone, Default)]
+pub struct MacroState {
+    /// Whether we're recording a macro
+    pub recording: bool,
+    /// Recorded key sequence
+    pub keys: Vec<Key>,
+    /// Whether we're playing back (to prevent recursion)
+    pub playing: bool,
+}
+
 impl EditorState {
     /// Create a new editor state
     pub fn new(terminal: Terminal) -> Self {
@@ -176,6 +190,7 @@ impl EditorState {
             search: SearchState::default(),
             prompt: PromptState::default(),
             query_replace: QueryReplaceState::default(),
+            macro_state: MacroState::default(),
         }
     }
 
@@ -192,6 +207,27 @@ impl EditorState {
 
         self.display.force_redraw();
         Ok(())
+    }
+
+    /// Create a new buffer for a file that doesn't exist yet
+    pub fn open_new_file(&mut self, path: &PathBuf) {
+        let name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+
+        let mut buffer = Buffer::new(&name);
+        buffer.set_filename(path.clone());
+        self.buffers.push(buffer);
+        let buf_idx = self.buffers.len() - 1;
+
+        // Set current window to show the new buffer
+        if let Some(window) = self.windows.get_mut(self.current_window) {
+            window.set_buffer_idx(buf_idx);
+        }
+
+        self.display.force_redraw();
+        self.display.set_message(&format!("(New file) {}", name));
     }
 
     /// Get current window
@@ -266,6 +302,11 @@ impl EditorState {
             return self.handle_query_replace_key(key);
         }
 
+        // Record key for macro (if recording and not playing back)
+        // We record the key before processing so we can record what was pressed
+        // Note: macro control keys (C-x (, C-x ), C-x e) will exclude themselves
+        let should_record = self.macro_state.recording && !self.macro_state.playing;
+
         // Clear any previous message
         self.display.clear_message();
 
@@ -291,7 +332,13 @@ impl EditorState {
         if let Some(cmd) = self.keytab.lookup(key) {
             // Execute command with no numeric argument
             match cmd(self, false, 1)? {
-                CommandStatus::Success => {}
+                CommandStatus::Success => {
+                    // Record successful command keys for macro
+                    // (macro control commands will clear this themselves)
+                    if should_record {
+                        self.macro_state.keys.push(key);
+                    }
+                }
                 CommandStatus::Failure => {
                     self.terminal.beep()?;
                 }
@@ -304,6 +351,10 @@ impl EditorState {
             // Self-insert character
             if let Some(ch) = key.base_char() {
                 self.insert_char(ch);
+            }
+            // Record self-insert keys for macro
+            if should_record {
+                self.macro_state.keys.push(key);
             }
         } else {
             // Unknown key
@@ -479,6 +530,159 @@ impl EditorState {
             .unwrap_or(0);
         self.current_window_mut().set_cursor(last_line, last_col);
         self.ensure_cursor_visible();
+    }
+
+    /// Check if a line is blank (empty or only whitespace)
+    fn is_blank_line(&self, line_idx: usize) -> bool {
+        self.current_buffer()
+            .line(line_idx)
+            .map(|l| l.text().trim().is_empty())
+            .unwrap_or(true)
+    }
+
+    /// Move backward to start of paragraph
+    pub fn backward_paragraph(&mut self) {
+        let mut line = self.current_window().cursor_line();
+        let line_count = self.current_buffer().line_count();
+
+        if line == 0 {
+            self.current_window_mut().set_cursor(0, 0);
+            return;
+        }
+
+        // If on a non-blank line, first skip to a blank line
+        while line > 0 && !self.is_blank_line(line) {
+            line -= 1;
+        }
+
+        // Then skip over blank lines
+        while line > 0 && self.is_blank_line(line) {
+            line -= 1;
+        }
+
+        // Then find the start of this paragraph (first blank line or start of buffer)
+        while line > 0 && !self.is_blank_line(line - 1) {
+            line -= 1;
+        }
+
+        self.current_window_mut().set_cursor(line, 0);
+        self.current_window_mut().set_goal_col(0);
+        self.ensure_cursor_visible();
+    }
+
+    /// Move forward to end of paragraph
+    pub fn forward_paragraph(&mut self) {
+        let mut line = self.current_window().cursor_line();
+        let line_count = self.current_buffer().line_count();
+
+        if line >= line_count {
+            return;
+        }
+
+        // Skip over blank lines first
+        while line < line_count && self.is_blank_line(line) {
+            line += 1;
+        }
+
+        // Then skip over non-blank lines (the paragraph content)
+        while line < line_count && !self.is_blank_line(line) {
+            line += 1;
+        }
+
+        // Position at the blank line after paragraph (or end of buffer)
+        let final_line = line.min(line_count.saturating_sub(1));
+        self.current_window_mut().set_cursor(final_line, 0);
+        self.current_window_mut().set_goal_col(0);
+        self.ensure_cursor_visible();
+    }
+
+    /// Fill (reflow) the current paragraph to fill_column width
+    pub fn fill_paragraph(&mut self, fill_column: usize) {
+        let start_line = self.current_window().cursor_line();
+        let line_count = self.current_buffer().line_count();
+
+        // Find paragraph boundaries
+        let mut para_start = start_line;
+        let mut para_end = start_line;
+
+        // Find start of paragraph
+        while para_start > 0 && !self.is_blank_line(para_start - 1) {
+            para_start -= 1;
+        }
+        // Skip if we're on a blank line
+        if self.is_blank_line(para_start) {
+            self.display.set_message("Not in a paragraph");
+            return;
+        }
+
+        // Find end of paragraph
+        while para_end < line_count && !self.is_blank_line(para_end) {
+            para_end += 1;
+        }
+
+        // Collect all words from the paragraph
+        let mut words: Vec<String> = Vec::new();
+        for line_idx in para_start..para_end {
+            if let Some(line) = self.current_buffer().line(line_idx) {
+                for word in line.text().split_whitespace() {
+                    words.push(word.to_string());
+                }
+            }
+        }
+
+        if words.is_empty() {
+            return;
+        }
+
+        // Reflow words into lines
+        let mut new_lines: Vec<String> = Vec::new();
+        let mut current_line = String::new();
+
+        for word in words {
+            if current_line.is_empty() {
+                current_line = word;
+            } else if current_line.len() + 1 + word.len() <= fill_column {
+                current_line.push(' ');
+                current_line.push_str(&word);
+            } else {
+                new_lines.push(current_line);
+                current_line = word;
+            }
+        }
+        if !current_line.is_empty() {
+            new_lines.push(current_line);
+        }
+
+        // Replace the paragraph lines
+        // First, delete the old paragraph lines
+        for _ in para_start..para_end {
+            self.current_buffer_mut().delete_line(para_start);
+        }
+
+        // Insert new lines (in reverse order since we insert at para_start)
+        for (i, line_content) in new_lines.iter().enumerate() {
+            let line_idx = para_start + i;
+            // Insert a new line at the position
+            if line_idx >= self.current_buffer().line_count() {
+                // Append at end
+                self.current_buffer_mut().append_line();
+            } else if i > 0 {
+                // Insert line before
+                self.current_buffer_mut().insert_line_at(line_idx);
+            }
+            // Set line content
+            if let Some(line) = self.current_buffer_mut().line_mut(line_idx) {
+                line.clear();
+                for ch in line_content.chars() {
+                    line.insert_char(line.len(), ch);
+                }
+            }
+        }
+
+        self.current_buffer_mut().set_modified(true);
+        self.current_window_mut().set_cursor(para_start, 0);
+        self.ensure_cursor_visible();
+        self.display.set_message(&format!("Filled paragraph ({} lines)", new_lines.len()));
     }
 
     /// Force a full redraw
@@ -935,6 +1139,12 @@ impl EditorState {
                 // Find first match
                 self.query_replace_next();
             }
+            PromptAction::ShellCommand => {
+                if input.is_empty() {
+                    return Ok(());
+                }
+                self.execute_shell_command(&input);
+            }
             PromptAction::None => {}
         }
         Ok(())
@@ -1254,5 +1464,116 @@ impl EditorState {
 
         self.display.force_redraw();
         self.display.set_message("");
+    }
+
+    /// Execute a shell command and display output in a buffer
+    pub fn execute_shell_command(&mut self, command: &str) {
+        use std::process::Command;
+
+        // Determine shell based on platform
+        #[cfg(windows)]
+        let output = Command::new("cmd")
+            .args(["/C", command])
+            .output();
+
+        #[cfg(not(windows))]
+        let output = Command::new("sh")
+            .args(["-c", command])
+            .output();
+
+        let content = match output {
+            Ok(output) => {
+                let mut result = String::new();
+                if !output.stdout.is_empty() {
+                    result.push_str(&String::from_utf8_lossy(&output.stdout));
+                }
+                if !output.stderr.is_empty() {
+                    if !result.is_empty() {
+                        result.push('\n');
+                    }
+                    result.push_str(&String::from_utf8_lossy(&output.stderr));
+                }
+                if result.is_empty() {
+                    "(No output)".to_string()
+                } else {
+                    result
+                }
+            }
+            Err(e) => format!("Error executing command: {}", e),
+        };
+
+        // Find or create the *Shell Command Output* buffer
+        let buf_name = "*Shell Command Output*";
+        if let Some(idx) = self.buffers.iter().position(|b| b.name() == buf_name) {
+            self.buffers[idx].set_content(&content);
+            if let Some(window) = self.windows.get_mut(self.current_window) {
+                window.set_buffer_idx(idx);
+                window.set_cursor(0, 0);
+            }
+        } else {
+            let buffer = Buffer::from_content(buf_name, &content);
+            self.buffers.push(buffer);
+            let idx = self.buffers.len() - 1;
+            if let Some(window) = self.windows.get_mut(self.current_window) {
+                window.set_buffer_idx(idx);
+                window.set_cursor(0, 0);
+            }
+        }
+
+        self.display.force_redraw();
+        self.display.set_message(&format!("Shell command: {}", command));
+    }
+
+    /// Start recording a keyboard macro
+    pub fn start_macro(&mut self) {
+        if self.macro_state.playing {
+            self.display.set_message("Can't define macro while executing macro");
+            return;
+        }
+        self.macro_state.recording = true;
+        self.macro_state.keys.clear();
+        self.display.set_message("Defining keyboard macro...");
+    }
+
+    /// End recording a keyboard macro
+    pub fn end_macro(&mut self) {
+        if !self.macro_state.recording {
+            self.display.set_message("Not defining keyboard macro");
+            return;
+        }
+        self.macro_state.recording = false;
+        let count = self.macro_state.keys.len();
+        self.display.set_message(&format!("Keyboard macro defined ({} keys)", count));
+    }
+
+    /// Execute the keyboard macro
+    pub fn execute_macro(&mut self) -> Result<()> {
+        if self.macro_state.playing {
+            // Already playing - ignore to prevent infinite recursion
+            return Ok(());
+        }
+        if self.macro_state.recording {
+            self.display.set_message("Can't execute macro while defining it");
+            return Ok(());
+        }
+        if self.macro_state.keys.is_empty() {
+            self.display.set_message("No keyboard macro defined");
+            return Ok(());
+        }
+
+        // Copy keys to avoid borrow issues
+        let keys: Vec<Key> = self.macro_state.keys.clone();
+
+        self.macro_state.playing = true;
+        for key in keys {
+            self.handle_key(key)?;
+            // Check if we should stop (e.g., user aborted)
+            if !self.running {
+                break;
+            }
+        }
+        self.macro_state.playing = false;
+
+        Ok(())
     }
 }
