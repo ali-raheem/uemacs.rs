@@ -166,6 +166,22 @@ impl KeyTable {
         self.bind(Key::ctlx('('), start_macro);    // C-x (
         self.bind(Key::ctlx(')'), end_macro);      // C-x )
         self.bind(Key::ctlx('e'), execute_macro);  // C-x e
+
+        // Case operations
+        self.bind(Key::meta('u'), upcase_word);       // M-u
+        self.bind(Key::meta('l'), downcase_word);     // M-l
+        self.bind(Key::meta('c'), capitalize_word);   // M-c
+        self.bind(Key::ctlx_ctrl('u'), upcase_region);   // C-x C-u
+        self.bind(Key::ctlx_ctrl('l'), downcase_region); // C-x C-l
+
+        // Swap mark and point
+        self.bind(Key::ctlx_ctrl('x'), exchange_point_and_mark); // C-x C-x
+
+        // Buffer position info
+        self.bind(Key::ctlx('='), what_cursor_position); // C-x =
+
+        // Whitespace operations
+        self.bind(Key::meta(' '), just_one_space); // M-SPC
     }
 }
 
@@ -388,9 +404,12 @@ pub mod commands {
         if f && n == 0 {
             // Kill from BOL to cursor
             if let Some(line) = editor.current_buffer().line(cursor_line) {
-                let killed = line.text()[..cursor_col].to_string();
+                let killed = line.safe_slice_to(cursor_col).to_string();
+                let actual_end = killed.len(); // Use actual byte length after safe slicing
                 if let Some(line_mut) = editor.current_buffer_mut().line_mut(cursor_line) {
-                    line_mut.delete_range(0, cursor_col);
+                    if actual_end > 0 {
+                        line_mut.delete_range(0, actual_end);
+                    }
                 }
                 editor.current_buffer_mut().set_modified(true);
                 editor.current_window_mut().set_cursor(cursor_line, 0);
@@ -573,10 +592,13 @@ pub mod commands {
             // At EOL: swap last two chars
             (len - 2, len - 1)
         } else {
-            // Find current char index
-            let cur_idx = chars.iter().position(|(pos, _)| *pos == cursor_col);
+            // Find current char index - use <= to handle cursor in middle of multi-byte char
+            let cur_idx = chars.iter().position(|(pos, ch)| {
+                *pos <= cursor_col && cursor_col < *pos + ch.len_utf8()
+            });
             match cur_idx {
                 Some(i) if i > 0 => (i - 1, i),
+                Some(0) if len > 1 => (0, 1), // At first char, swap with next
                 _ => return Ok(CommandStatus::Failure),
             }
         };
@@ -770,11 +792,15 @@ pub mod commands {
             if start_line == end_line {
                 // Same line - simple case
                 if let Some(line) = editor.current_buffer().line(start_line) {
-                    let killed = line.text()[start_col..end_col].to_string();
+                    let killed = line.safe_slice(start_col, end_col).to_string();
+                    let actual_start = line.text().len() - line.safe_slice_from(start_col).len();
+                    let actual_end = actual_start + killed.len();
                     editor.kill_append(&killed);
-                }
-                if let Some(line) = editor.current_buffer_mut().line_mut(start_line) {
-                    line.delete_range(start_col, end_col);
+                    if let Some(line_mut) = editor.current_buffer_mut().line_mut(start_line) {
+                        if actual_end > actual_start {
+                            line_mut.delete_range(actual_start, actual_end);
+                        }
+                    }
                 }
                 editor.current_buffer_mut().set_modified(true);
             } else {
@@ -831,11 +857,15 @@ pub mod commands {
             if start_line == end_line {
                 // Same line - simple case
                 if let Some(line) = editor.current_buffer().line(start_line) {
-                    let killed = line.text()[start_col..end_col].to_string();
+                    let killed = line.safe_slice(start_col, end_col).to_string();
+                    let actual_start = line.text().len() - line.safe_slice_from(start_col).len();
+                    let actual_end = actual_start + killed.len();
                     editor.kill_prepend(&killed);
-                }
-                if let Some(line) = editor.current_buffer_mut().line_mut(start_line) {
-                    line.delete_range(start_col, end_col);
+                    if let Some(line_mut) = editor.current_buffer_mut().line_mut(start_line) {
+                        if actual_end > actual_start {
+                            line_mut.delete_range(actual_start, actual_end);
+                        }
+                    }
                 }
                 editor.current_buffer_mut().set_modified(true);
             } else {
@@ -930,13 +960,11 @@ pub mod commands {
 
         for line_idx in start_line..=end_line {
             if let Some(line) = editor.current_buffer().line(line_idx) {
-                let line_text = line.text();
                 let start = if line_idx == start_line { start_col } else { 0 };
-                let end = if line_idx == end_line { end_col.min(line_text.len()) } else { line_text.len() };
+                let end = if line_idx == end_line { end_col } else { line.len() };
 
-                if start < line_text.len() {
-                    text.push_str(&line_text[start..end]);
-                }
+                // Use safe_slice to handle UTF-8 boundaries correctly
+                text.push_str(line.safe_slice(start, end));
 
                 // Add newline between lines (but not after the last line segment)
                 if line_idx < end_line {
@@ -1200,8 +1228,7 @@ pub mod commands {
 
     /// Start recording a keyboard macro (C-x ()
     pub fn start_macro(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
-        // Remove this key from macro recording (it shouldn't be part of the macro)
-        editor.macro_state.keys.pop();
+        // Note: No need to pop - recording wasn't active yet when this key was processed
         editor.start_macro();
         Ok(CommandStatus::Success)
     }
@@ -1221,6 +1248,239 @@ pub mod commands {
         for _ in 0..count {
             editor.execute_macro()?;
         }
+        Ok(CommandStatus::Success)
+    }
+
+    /// Uppercase word at cursor (M-u)
+    pub fn upcase_word(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        for _ in 0..n.max(1) {
+            transform_word(editor, |s| s.to_uppercase());
+        }
+        Ok(CommandStatus::Success)
+    }
+
+    /// Lowercase word at cursor (M-l)
+    pub fn downcase_word(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        for _ in 0..n.max(1) {
+            transform_word(editor, |s| s.to_lowercase());
+        }
+        Ok(CommandStatus::Success)
+    }
+
+    /// Capitalize word at cursor (M-c)
+    pub fn capitalize_word(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        for _ in 0..n.max(1) {
+            transform_word(editor, |s| {
+                let mut chars = s.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(first) => first.to_uppercase().chain(chars.flat_map(|c| c.to_lowercase())).collect(),
+                }
+            });
+        }
+        Ok(CommandStatus::Success)
+    }
+
+    /// Helper: transform word at cursor using a transformation function
+    fn transform_word<F>(editor: &mut EditorState, transform: F)
+    where
+        F: Fn(&str) -> String,
+    {
+        let start_line = editor.current_window().cursor_line();
+        let start_col = editor.current_window().cursor_col();
+
+        // Move forward to find end of word
+        let _ = forward_word(editor, false, 1);
+
+        let end_line = editor.current_window().cursor_line();
+        let end_col = editor.current_window().cursor_col();
+
+        // If on same line, transform the word
+        if start_line == end_line {
+            if let Some(line) = editor.current_buffer().line(start_line) {
+                let text = line.safe_slice(start_col, end_col);
+                let transformed = transform(text);
+
+                // Calculate actual byte boundaries
+                let actual_start = line.text().len() - line.safe_slice_from(start_col).len();
+                let actual_end = actual_start + line.safe_slice(start_col, end_col).len();
+
+                if let Some(line_mut) = editor.current_buffer_mut().line_mut(start_line) {
+                    line_mut.delete_range(actual_start, actual_end);
+                    // Insert transformed text
+                    let mut pos = actual_start;
+                    for ch in transformed.chars() {
+                        line_mut.insert_char(pos, ch);
+                        pos += ch.len_utf8();
+                    }
+                }
+                editor.current_buffer_mut().set_modified(true);
+
+                // Update cursor to end of transformed word
+                editor.current_window_mut().set_cursor(start_line, actual_start + transformed.len());
+            }
+        }
+        // Multi-line words are rare; just move to word end
+    }
+
+    /// Uppercase region (C-x C-u)
+    pub fn upcase_region(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        transform_region(editor, |s| s.to_uppercase())
+    }
+
+    /// Lowercase region (C-x C-l)
+    pub fn downcase_region(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        transform_region(editor, |s| s.to_lowercase())
+    }
+
+    /// Helper: transform text in region
+    fn transform_region<F>(editor: &mut EditorState, transform: F) -> Result<CommandStatus>
+    where
+        F: Fn(&str) -> String,
+    {
+        let region = match get_region(editor) {
+            Some(r) => r,
+            None => {
+                editor.display.set_message("No mark set");
+                return Ok(CommandStatus::Failure);
+            }
+        };
+
+        let (start_line, start_col, end_line, end_col) = region;
+
+        // Collect and transform text line by line
+        for line_idx in start_line..=end_line {
+            if let Some(line) = editor.current_buffer().line(line_idx) {
+                let line_start = if line_idx == start_line { start_col } else { 0 };
+                let line_end = if line_idx == end_line { end_col } else { line.len() };
+
+                let text = line.safe_slice(line_start, line_end);
+                let transformed = transform(text);
+
+                // Calculate actual byte boundaries
+                let actual_start = line.text().len() - line.safe_slice_from(line_start).len();
+                let actual_end = actual_start + line.safe_slice(line_start, line_end).len();
+
+                if let Some(line_mut) = editor.current_buffer_mut().line_mut(line_idx) {
+                    line_mut.delete_range(actual_start, actual_end);
+                    // Insert transformed text
+                    let mut pos = actual_start;
+                    for ch in transformed.chars() {
+                        line_mut.insert_char(pos, ch);
+                        pos += ch.len_utf8();
+                    }
+                }
+            }
+        }
+
+        editor.current_buffer_mut().set_modified(true);
+        editor.display.set_message("Region case changed");
+        Ok(CommandStatus::Success)
+    }
+
+    /// Exchange point and mark (C-x C-x)
+    pub fn exchange_point_and_mark(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        let window = editor.current_window();
+        let cursor_line = window.cursor_line();
+        let cursor_col = window.cursor_col();
+
+        if let Some(mark) = window.mark() {
+            let (mark_line, mark_col) = mark;
+
+            // Set cursor to mark position
+            editor.current_window_mut().set_cursor(mark_line, mark_col);
+            // Set mark to old cursor position
+            editor.current_window_mut().set_mark_at(cursor_line, cursor_col);
+
+            editor.ensure_cursor_visible();
+            Ok(CommandStatus::Success)
+        } else {
+            editor.display.set_message("No mark set");
+            Ok(CommandStatus::Failure)
+        }
+    }
+
+    /// Show cursor position information (C-x =)
+    pub fn what_cursor_position(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        let cursor_line = editor.current_window().cursor_line();
+        let cursor_col = editor.current_window().cursor_col();
+        let line_count = editor.current_buffer().line_count();
+
+        let (char_info, char_code) = if let Some(line) = editor.current_buffer().line(cursor_line) {
+            let text = line.text();
+            if cursor_col < text.len() {
+                if let Some(ch) = text[cursor_col..].chars().next() {
+                    (format!("'{}'", ch), format!("0x{:04X}", ch as u32))
+                } else {
+                    ("EOL".to_string(), "".to_string())
+                }
+            } else {
+                ("EOL".to_string(), "".to_string())
+            }
+        } else {
+            ("EOB".to_string(), "".to_string())
+        };
+
+        let msg = if char_code.is_empty() {
+            format!("Line {} of {} Col {} {}", cursor_line + 1, line_count, cursor_col, char_info)
+        } else {
+            format!("Line {} of {} Col {} {} ({})", cursor_line + 1, line_count, cursor_col, char_info, char_code)
+        };
+
+        editor.display.set_message(&msg);
+        Ok(CommandStatus::Success)
+    }
+
+    /// Delete all spaces and tabs around cursor, leave exactly one space (M-SPC)
+    pub fn just_one_space(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        let cursor_line = editor.current_window().cursor_line();
+        let cursor_col = editor.current_window().cursor_col();
+
+        if let Some(line) = editor.current_buffer().line(cursor_line) {
+            let text = line.text();
+
+            // Find start of whitespace (going backward)
+            let mut start = cursor_col;
+            while start > 0 {
+                let before = &text[..start];
+                if let Some(ch) = before.chars().last() {
+                    if ch == ' ' || ch == '\t' {
+                        start -= ch.len_utf8();
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // Find end of whitespace (going forward)
+            let mut end = cursor_col;
+            while end < text.len() {
+                if let Some(ch) = text[end..].chars().next() {
+                    if ch == ' ' || ch == '\t' {
+                        end += ch.len_utf8();
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // Delete the whitespace range
+            if start < end {
+                if let Some(line_mut) = editor.current_buffer_mut().line_mut(cursor_line) {
+                    line_mut.delete_range(start, end);
+                    // Insert exactly one space
+                    line_mut.insert_char(start, ' ');
+                }
+                editor.current_buffer_mut().set_modified(true);
+                // Move cursor to after the space
+                editor.current_window_mut().set_cursor(cursor_line, start + 1);
+            }
+        }
+
         Ok(CommandStatus::Success)
     }
 }

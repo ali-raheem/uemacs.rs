@@ -654,20 +654,23 @@ impl EditorState {
         }
 
         // Replace the paragraph lines
-        // First, delete the old paragraph lines
-        for _ in para_start..para_end {
-            self.current_buffer_mut().delete_line(para_start);
+        // First, delete the old paragraph lines (deleting from para_start repeatedly)
+        let lines_to_delete = para_end - para_start;
+        for _ in 0..lines_to_delete {
+            if para_start < self.current_buffer().line_count() {
+                self.current_buffer_mut().delete_line(para_start);
+            }
         }
 
-        // Insert new lines (in reverse order since we insert at para_start)
+        // Insert new lines at para_start
         for (i, line_content) in new_lines.iter().enumerate() {
             let line_idx = para_start + i;
-            // Insert a new line at the position
+            // Always insert a new line (except if we're past the end and need to append)
             if line_idx >= self.current_buffer().line_count() {
                 // Append at end
                 self.current_buffer_mut().append_line();
-            } else if i > 0 {
-                // Insert line before
+            } else {
+                // Insert line at this position
                 self.current_buffer_mut().insert_line_at(line_idx);
             }
             // Set line content
@@ -1333,17 +1336,20 @@ impl EditorState {
 
         if let Some(line) = self.current_buffer_mut().line_mut(line_idx) {
             // Delete the search string
-            line.delete_range(col, col + search_len);
-            // Insert the replacement
-            for (i, ch) in replace_str.chars().enumerate() {
-                line.insert_char(col + i, ch);
+            let end_col = (col + search_len).min(line.len());
+            line.delete_range(col, end_col);
+            // Insert the replacement - track byte offset for multi-byte chars
+            let mut byte_offset = col;
+            for ch in replace_str.chars() {
+                line.insert_char(byte_offset, ch);
+                byte_offset += ch.len_utf8();
             }
         }
 
         self.current_buffer_mut().set_modified(true);
         self.query_replace.count += 1;
 
-        // Move cursor past the replacement
+        // Move cursor past the replacement (use byte length)
         let new_col = col + replace_str.len();
         self.current_window_mut().set_cursor(line_idx, new_col);
     }

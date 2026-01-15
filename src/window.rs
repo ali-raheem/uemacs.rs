@@ -104,6 +104,12 @@ impl Window {
         self.mark_col = Some(self.cursor_col);
     }
 
+    /// Set mark at a specific position
+    pub fn set_mark_at(&mut self, line: usize, col: usize) {
+        self.mark_line = Some(line);
+        self.mark_col = Some(col);
+    }
+
     /// Clear the mark
     pub fn clear_mark(&mut self) {
         self.mark_line = None;

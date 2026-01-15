@@ -8,8 +8,12 @@ A Rust port of [uEmacs/PK](https://git.kernel.org/pub/scm/editors/uemacs/uemacs.
 - Multiple buffers and split windows
 - Incremental search and query-replace
 - Kill ring (clipboard) with yank
-- Undo support
-- UTF-8 text handling
+- Undo support with operation grouping
+- Keyboard macros (record, playback)
+- Word/region case operations (upcase, downcase, capitalize)
+- Paragraph operations (movement, fill)
+- Shell command execution
+- UTF-8/Unicode text handling
 - Cross-platform (Windows, Linux, macOS)
 
 ## Building

@@ -8,18 +8,19 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 
 ## Progress Summary
 
-**Status: ~95% Complete** - A fully functional text editor with core Emacs keybindings.
+**Status: ~98% Complete** - A fully functional text editor with comprehensive Emacs keybindings.
 
 ### What Works
 
 | Category | Features |
 |----------|----------|
 | **Navigation** | Cursor (C-f/b/n/p, arrows), words (M-f/b), lines (C-a/e), pages (C-v, M-v), buffer (M-<, M->), paragraphs (M-{ M-}) |
-| **Editing** | Insert, delete (C-d, Backspace), kill line (C-k), yank (C-y), kill word (M-d), transpose (C-t), quote (C-q), fill paragraph (M-q) |
-| **Mark/Region** | Set mark (C-space), kill region (C-w), copy region (M-w) |
+| **Editing** | Insert, delete (C-d, Backspace), kill line (C-k), yank (C-y), kill word (M-d), transpose (C-t), quote (C-q), fill paragraph (M-q), just-one-space (M-SPC) |
+| **Case** | Upcase word (M-u), downcase word (M-l), capitalize (M-c), upcase region (C-x C-u), downcase region (C-x C-l) |
+| **Mark/Region** | Set mark (C-space), kill region (C-w), copy region (M-w), exchange point/mark (C-x C-x) |
 | **Search** | Incremental search (C-s, C-r), query replace (M-%) |
 | **Files** | Open (C-x C-f), save (C-x C-s), quit (C-x C-c) |
-| **Buffers** | Switch (C-x b), list (C-x C-b), kill (C-x k), goto line (M-g), shell command (M-!) |
+| **Buffers** | Switch (C-x b), list (C-x C-b), kill (C-x k), goto line (M-g), shell command (M-!), cursor position (C-x =) |
 | **Windows** | Split (C-x 2), delete (C-x 0/1), switch (C-x o) |
 | **Undo** | Undo (C-/ or C-_) with operation grouping |
 | **Macros** | Record (C-x (), stop (C-x )), execute (C-x e) |
@@ -30,6 +31,7 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 - Named macros and macro persistence
 - Rectangle operations
 - Customizable key bindings file
+- Tab/detab operations
 
 ### Key Bindings Quick Reference
 
@@ -41,18 +43,20 @@ C-a/e  line start/end    C-y    yank             C-x C-b  list buffers
 M-f/b  word fwd/back     C-w    kill region      C-x b    switch buffer
 C-v    page down         M-w    copy region      C-x k    kill buffer
 M-v    page up           C-t    transpose        C-x C-c  quit
-M-</>  buffer start/end  C-q    quote char
+M-</>  buffer start/end  C-q    quote char       C-x =    cursor position
+M-{/}  paragraph         M-SPC  just one space
 
-Search:              Windows:              Other:
-C-s    search fwd        C-x 2  split            C-space  set mark
-C-r    search back       C-x 1  delete others    C-g      abort
-M-%    query replace     C-x 0  delete window    C-l      refresh
-                         C-x o  other window     C-/ C-_  undo
+Search:              Windows:              Case:
+C-s    search fwd        C-x 2  split            M-u    upcase word
+C-r    search back       C-x 1  delete others    M-l    downcase word
+M-%    query replace     C-x 0  delete window    M-c    capitalize word
+                         C-x o  other window     C-x C-u upcase region
+                                                 C-x C-l downcase region
 
-Macros:
-C-x (  start recording
-C-x )  stop recording
-C-x e  execute macro
+Macros:              Mark/Region:          Other:
+C-x (  start recording   C-space  set mark       C-g      abort
+C-x )  stop recording    C-x C-x  exchange       C-l      refresh
+C-x e  execute macro                             C-/ C-_  undo
 ```
 
 ## Build Commands
