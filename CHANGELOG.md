@@ -28,6 +28,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Utility Commands**
   - `C-x =` - Show cursor position info (line, column, character code)
   - `M-SPC` - Just one space (delete surrounding whitespace, leave exactly one space)
+  - `M-\` - Delete horizontal space (delete all spaces/tabs around cursor)
+  - `C-x C-o` - Delete blank lines (delete blank lines around cursor)
+  - `M-i` - Tab to tab stop (insert spaces to next tab stop)
+  - `M-?` - Describe key (show what command a key is bound to)
 
 - **UTF-8 Safety**
   - `safe_slice()`, `safe_slice_to()`, `safe_slice_from()` methods in Line struct

@@ -266,6 +266,49 @@ impl EditorState {
         &mut self.buffers[buf_idx]
     }
 
+    /// Get the key table for looking up bindings
+    pub fn key_table(&self) -> &KeyTable {
+        &self.keytab
+    }
+
+    /// Read a key for describe-key command, handling prefix sequences
+    pub fn read_key_for_describe(&mut self) -> Result<Option<Key>> {
+        use crate::input::InputState;
+
+        // Use a fresh input state for reading the describe key
+        let mut input_state = InputState::new();
+
+        loop {
+            let key_event = self.terminal.read_key()?;
+
+            // Check for C-g (abort)
+            if let crossterm::event::KeyCode::Char('g') = key_event.code {
+                if key_event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
+                    return Ok(None);
+                }
+            }
+
+            if let Some(key) = input_state.translate_key(key_event) {
+                return Ok(Some(key));
+            }
+
+            // Show visual feedback for pending prefix
+            if input_state.is_pending() {
+                if input_state.is_ctlx_pending() {
+                    self.display.set_message("Describe key: C-x -");
+                } else if input_state.is_meta_pending() {
+                    self.display.set_message("Describe key: ESC -");
+                }
+                self.display.render(
+                    &mut self.terminal,
+                    &self.windows,
+                    &self.buffers,
+                    self.current_window,
+                )?;
+            }
+        }
+    }
+
     /// Run the main editor loop
     pub fn run(&mut self) -> Result<()> {
         self.display.force_redraw();

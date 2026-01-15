@@ -2,9 +2,13 @@
 name = "uemacs"
 version = "0.2.0"
 edition = "2021"
-author = "Ali Raheem"
-description = "uEmacs/PK text editor ported to Rust made with Claude Code"
+authors = ["Ali Raheem"]
+description = "uEmacs/PK text editor ported to Rust"
 license-file = "LICENSE.txt"
+repository = "https://github.com/ali-raheem/uemacs.rs"
+homepage = "https://crates.io/crates/uemacs"
+keywords = ["emacs", "editor", "terminal", "cli", "text-editor"]
+categories = ["command-line-utilities", "text-editors"]
 
 [dependencies]
 crossterm = "0.27"

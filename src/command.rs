@@ -26,9 +26,15 @@ pub struct Command {
     pub function: CommandFn,
 }
 
+/// Key binding entry with command function and name
+struct BindingEntry {
+    function: CommandFn,
+    name: &'static str,
+}
+
 /// Key binding table
 pub struct KeyTable {
-    bindings: HashMap<u32, CommandFn>,
+    bindings: HashMap<u32, BindingEntry>,
 }
 
 impl KeyTable {
@@ -46,9 +52,15 @@ impl KeyTable {
         table
     }
 
-    /// Add a key binding
+    /// Add a key binding with command name
+    pub fn bind_named(&mut self, key: Key, cmd: CommandFn, name: &'static str) {
+        self.bindings.insert(key.code(), BindingEntry { function: cmd, name });
+    }
+
+    /// Add a key binding (uses function pointer as identifier)
     pub fn bind(&mut self, key: Key, cmd: CommandFn) {
-        self.bindings.insert(key.code(), cmd);
+        // For backwards compatibility, derive name from function if not specified
+        self.bindings.insert(key.code(), BindingEntry { function: cmd, name: "unknown" });
     }
 
     /// Remove a key binding
@@ -58,7 +70,12 @@ impl KeyTable {
 
     /// Look up a command for a key
     pub fn lookup(&self, key: Key) -> Option<CommandFn> {
-        self.bindings.get(&key.code()).copied()
+        self.bindings.get(&key.code()).map(|e| e.function)
+    }
+
+    /// Look up a command name for a key
+    pub fn lookup_name(&self, key: Key) -> Option<&'static str> {
+        self.bindings.get(&key.code()).map(|e| e.name)
     }
 
     /// Set up default key bindings
@@ -66,122 +83,130 @@ impl KeyTable {
         use commands::*;
 
         // Basic cursor movement
-        self.bind(Key::ctrl('f'), forward_char);
-        self.bind(Key::ctrl('b'), backward_char);
-        self.bind(Key::ctrl('n'), next_line);
-        self.bind(Key::ctrl('p'), previous_line);
-        self.bind(Key::ctrl('a'), beginning_of_line);
-        self.bind(Key::ctrl('e'), end_of_line);
+        self.bind_named(Key::ctrl('f'), forward_char, "forward-char");
+        self.bind_named(Key::ctrl('b'), backward_char, "backward-char");
+        self.bind_named(Key::ctrl('n'), next_line, "next-line");
+        self.bind_named(Key::ctrl('p'), previous_line, "previous-line");
+        self.bind_named(Key::ctrl('a'), beginning_of_line, "beginning-of-line");
+        self.bind_named(Key::ctrl('e'), end_of_line, "end-of-line");
 
         // Page movement
-        self.bind(Key::ctrl('v'), scroll_down);
-        self.bind(Key::meta('v'), scroll_up);
-        self.bind(Key::meta('<'), beginning_of_buffer);
-        self.bind(Key::meta('>'), end_of_buffer);
+        self.bind_named(Key::ctrl('v'), scroll_down, "scroll-down");
+        self.bind_named(Key::meta('v'), scroll_up, "scroll-up");
+        self.bind_named(Key::meta('<'), beginning_of_buffer, "beginning-of-buffer");
+        self.bind_named(Key::meta('>'), end_of_buffer, "end-of-buffer");
 
         // Arrow keys (special keys)
-        self.bind(Key::special(0x4d), forward_char);  // Right
-        self.bind(Key::special(0x4b), backward_char); // Left
-        self.bind(Key::special(0x50), next_line);     // Down
-        self.bind(Key::special(0x48), previous_line); // Up
-        self.bind(Key::special(0x49), scroll_up);     // PageUp
-        self.bind(Key::special(0x51), scroll_down);   // PageDown
-        self.bind(Key::special(0x47), beginning_of_line); // Home
-        self.bind(Key::special(0x4f), end_of_line);       // End
+        self.bind_named(Key::special(0x4d), forward_char, "forward-char");  // Right
+        self.bind_named(Key::special(0x4b), backward_char, "backward-char"); // Left
+        self.bind_named(Key::special(0x50), next_line, "next-line");     // Down
+        self.bind_named(Key::special(0x48), previous_line, "previous-line"); // Up
+        self.bind_named(Key::special(0x49), scroll_up, "scroll-up");     // PageUp
+        self.bind_named(Key::special(0x51), scroll_down, "scroll-down");   // PageDown
+        self.bind_named(Key::special(0x47), beginning_of_line, "beginning-of-line"); // Home
+        self.bind_named(Key::special(0x4f), end_of_line, "end-of-line");       // End
 
         // Screen refresh
-        self.bind(Key::ctrl('l'), redraw_display);
+        self.bind_named(Key::ctrl('l'), redraw_display, "redraw-display");
 
         // Quit
-        self.bind(Key::ctlx_ctrl('c'), quit);
+        self.bind_named(Key::ctlx_ctrl('c'), quit, "save-buffers-kill-emacs");
 
         // Abort
-        self.bind(Key::ctrl('g'), abort);
+        self.bind_named(Key::ctrl('g'), abort, "keyboard-quit");
 
         // Editing commands
-        self.bind(Key::ctrl('d'), delete_char_forward);
-        self.bind(Key::special(0x53), delete_char_forward); // Delete key
-        self.bind(Key(0x7f), delete_char_backward);         // Backspace
-        self.bind(Key::ctrl('h'), delete_char_backward);    // C-h also backspace
+        self.bind_named(Key::ctrl('d'), delete_char_forward, "delete-char");
+        self.bind_named(Key::special(0x53), delete_char_forward, "delete-char"); // Delete key
+        self.bind_named(Key(0x7f), delete_char_backward, "delete-backward-char");         // Backspace
+        self.bind_named(Key::ctrl('h'), delete_char_backward, "delete-backward-char");    // C-h also backspace
 
-        self.bind(Key::ctrl('k'), kill_line);
-        self.bind(Key::ctrl('y'), yank);
+        self.bind_named(Key::ctrl('k'), kill_line, "kill-line");
+        self.bind_named(Key::ctrl('y'), yank, "yank");
 
-        self.bind(Key::ctrl('m'), newline);    // Enter
-        self.bind(Key::ctrl('o'), open_line);
-        self.bind(Key::ctrl('j'), indent_newline);
-        self.bind(Key::ctrl('i'), insert_tab); // Tab
+        self.bind_named(Key::ctrl('m'), newline, "newline");    // Enter
+        self.bind_named(Key::ctrl('o'), open_line, "open-line");
+        self.bind_named(Key::ctrl('j'), indent_newline, "newline-and-indent");
+        self.bind_named(Key::ctrl('i'), insert_tab, "tab-to-tab-stop"); // Tab
 
-        self.bind(Key::ctrl('t'), transpose_chars);
-        self.bind(Key::ctrl('q'), quote_char);
+        self.bind_named(Key::ctrl('t'), transpose_chars, "transpose-chars");
+        self.bind_named(Key::ctrl('q'), quote_char, "quoted-insert");
 
         // File operations
-        self.bind(Key::ctlx_ctrl('s'), save_buffer);
+        self.bind_named(Key::ctlx_ctrl('s'), save_buffer, "save-buffer");
 
         // Word operations
-        self.bind(Key::meta('f'), forward_word);
-        self.bind(Key::meta('b'), backward_word);
-        self.bind(Key::meta('d'), kill_word);
+        self.bind_named(Key::meta('f'), forward_word, "forward-word");
+        self.bind_named(Key::meta('b'), backward_word, "backward-word");
+        self.bind_named(Key::meta('d'), kill_word, "kill-word");
         // M-Backspace for backward kill word
-        self.bind(Key(0x2000_007f), backward_kill_word); // META | 0x7f
+        self.bind_named(Key(0x2000_007f), backward_kill_word, "backward-kill-word"); // META | 0x7f
 
         // Paragraph operations
-        self.bind(Key::meta('{'), backward_paragraph);
-        self.bind(Key::meta('}'), forward_paragraph);
-        self.bind(Key::meta('q'), fill_paragraph);
+        self.bind_named(Key::meta('{'), backward_paragraph, "backward-paragraph");
+        self.bind_named(Key::meta('}'), forward_paragraph, "forward-paragraph");
+        self.bind_named(Key::meta('q'), fill_paragraph, "fill-paragraph");
 
         // Mark/Region operations
-        self.bind(Key::ctrl(' '), set_mark);  // C-space
-        self.bind(Key::ctrl('w'), kill_region);
-        self.bind(Key::meta('w'), copy_region);
+        self.bind_named(Key::ctrl(' '), set_mark, "set-mark-command");  // C-space
+        self.bind_named(Key::ctrl('w'), kill_region, "kill-region");
+        self.bind_named(Key::meta('w'), copy_region, "kill-ring-save");
 
         // Search
-        self.bind(Key::ctrl('s'), search_forward);
-        self.bind(Key::ctrl('r'), search_backward);
-        self.bind(Key::meta('%'), query_replace);  // M-%
+        self.bind_named(Key::ctrl('s'), search_forward, "isearch-forward");
+        self.bind_named(Key::ctrl('r'), search_backward, "isearch-backward");
+        self.bind_named(Key::meta('%'), query_replace, "query-replace");  // M-%
 
         // Buffer operations
-        self.bind(Key::ctlx_ctrl('f'), find_file);
-        self.bind(Key::ctlx('b'), switch_buffer);
-        self.bind(Key::ctlx_ctrl('b'), list_buffers);  // C-x C-b
-        self.bind(Key::ctlx('k'), kill_buffer);
+        self.bind_named(Key::ctlx_ctrl('f'), find_file, "find-file");
+        self.bind_named(Key::ctlx('b'), switch_buffer, "switch-to-buffer");
+        self.bind_named(Key::ctlx_ctrl('b'), list_buffers, "list-buffers");  // C-x C-b
+        self.bind_named(Key::ctlx('k'), kill_buffer, "kill-buffer");
 
         // Go to line
-        self.bind(Key::meta('g'), goto_line);
+        self.bind_named(Key::meta('g'), goto_line, "goto-line");
 
         // Window operations
-        self.bind(Key::ctlx('2'), split_window);
-        self.bind(Key::ctlx('1'), delete_other_windows);
-        self.bind(Key::ctlx('0'), delete_window);
-        self.bind(Key::ctlx('o'), other_window);
+        self.bind_named(Key::ctlx('2'), split_window, "split-window-below");
+        self.bind_named(Key::ctlx('1'), delete_other_windows, "delete-other-windows");
+        self.bind_named(Key::ctlx('0'), delete_window, "delete-window");
+        self.bind_named(Key::ctlx('o'), other_window, "other-window");
 
         // Undo
-        self.bind(Key::ctrl('/'), undo);  // C-/
-        self.bind(Key::ctrl('_'), undo);  // C-_ (same as C-/ in many terminals)
+        self.bind_named(Key::ctrl('/'), undo, "undo");  // C-/
+        self.bind_named(Key::ctrl('_'), undo, "undo");  // C-_ (same as C-/ in many terminals)
 
         // Shell
-        self.bind(Key::meta('!'), shell_command);  // M-!
+        self.bind_named(Key::meta('!'), shell_command, "shell-command");  // M-!
 
         // Keyboard macros
-        self.bind(Key::ctlx('('), start_macro);    // C-x (
-        self.bind(Key::ctlx(')'), end_macro);      // C-x )
-        self.bind(Key::ctlx('e'), execute_macro);  // C-x e
+        self.bind_named(Key::ctlx('('), start_macro, "kmacro-start-macro");    // C-x (
+        self.bind_named(Key::ctlx(')'), end_macro, "kmacro-end-macro");      // C-x )
+        self.bind_named(Key::ctlx('e'), execute_macro, "kmacro-end-and-call-macro");  // C-x e
 
         // Case operations
-        self.bind(Key::meta('u'), upcase_word);       // M-u
-        self.bind(Key::meta('l'), downcase_word);     // M-l
-        self.bind(Key::meta('c'), capitalize_word);   // M-c
-        self.bind(Key::ctlx_ctrl('u'), upcase_region);   // C-x C-u
-        self.bind(Key::ctlx_ctrl('l'), downcase_region); // C-x C-l
+        self.bind_named(Key::meta('u'), upcase_word, "upcase-word");       // M-u
+        self.bind_named(Key::meta('l'), downcase_word, "downcase-word");     // M-l
+        self.bind_named(Key::meta('c'), capitalize_word, "capitalize-word");   // M-c
+        self.bind_named(Key::ctlx_ctrl('u'), upcase_region, "upcase-region");   // C-x C-u
+        self.bind_named(Key::ctlx_ctrl('l'), downcase_region, "downcase-region"); // C-x C-l
 
         // Swap mark and point
-        self.bind(Key::ctlx_ctrl('x'), exchange_point_and_mark); // C-x C-x
+        self.bind_named(Key::ctlx_ctrl('x'), exchange_point_and_mark, "exchange-point-and-mark"); // C-x C-x
 
         // Buffer position info
-        self.bind(Key::ctlx('='), what_cursor_position); // C-x =
+        self.bind_named(Key::ctlx('='), what_cursor_position, "what-cursor-position"); // C-x =
 
         // Whitespace operations
-        self.bind(Key::meta(' '), just_one_space); // M-SPC
+        self.bind_named(Key::meta(' '), just_one_space, "just-one-space"); // M-SPC
+        self.bind_named(Key::meta('\\'), delete_horizontal_space, "delete-horizontal-space"); // M-\
+        self.bind_named(Key::ctlx_ctrl('o'), delete_blank_lines, "delete-blank-lines"); // C-x C-o
+
+        // Indentation
+        self.bind_named(Key::meta('i'), tab_to_tab_stop, "tab-to-tab-stop"); // M-i
+
+        // Help (M-? since C-h is backspace in uEmacs)
+        self.bind_named(Key::meta('?'), describe_key, "describe-key"); // M-?
     }
 }
 
@@ -1479,6 +1504,195 @@ pub mod commands {
                 // Move cursor to after the space
                 editor.current_window_mut().set_cursor(cursor_line, start + 1);
             }
+        }
+
+        Ok(CommandStatus::Success)
+    }
+
+    /// Delete all spaces and tabs around cursor (M-\)
+    pub fn delete_horizontal_space(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        let cursor_line = editor.current_window().cursor_line();
+        let cursor_col = editor.current_window().cursor_col();
+
+        if let Some(line) = editor.current_buffer().line(cursor_line) {
+            let text = line.text();
+
+            // Find start of whitespace (going backward)
+            let mut start = cursor_col;
+            while start > 0 {
+                let before = &text[..start];
+                if let Some(ch) = before.chars().last() {
+                    if ch == ' ' || ch == '\t' {
+                        start -= ch.len_utf8();
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // Find end of whitespace (going forward)
+            let mut end = cursor_col;
+            while end < text.len() {
+                if let Some(ch) = text[end..].chars().next() {
+                    if ch == ' ' || ch == '\t' {
+                        end += ch.len_utf8();
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // Delete the whitespace range (don't insert any space)
+            if start < end {
+                if let Some(line_mut) = editor.current_buffer_mut().line_mut(cursor_line) {
+                    line_mut.delete_range(start, end);
+                }
+                editor.current_buffer_mut().set_modified(true);
+                editor.current_window_mut().set_cursor(cursor_line, start);
+            }
+        }
+
+        Ok(CommandStatus::Success)
+    }
+
+    /// Delete blank lines around cursor (C-x C-o)
+    pub fn delete_blank_lines(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        let cursor_line = editor.current_window().cursor_line();
+
+        // Check if current line is blank
+        let current_is_blank = editor
+            .current_buffer()
+            .line(cursor_line)
+            .map(|l| l.text().trim().is_empty())
+            .unwrap_or(false);
+
+        if current_is_blank {
+            // Delete all contiguous blank lines, leave one
+            let mut first_blank = cursor_line;
+            let mut last_blank = cursor_line;
+
+            // Find first blank line in this group
+            while first_blank > 0 {
+                let prev_blank = editor
+                    .current_buffer()
+                    .line(first_blank - 1)
+                    .map(|l| l.text().trim().is_empty())
+                    .unwrap_or(false);
+                if prev_blank {
+                    first_blank -= 1;
+                } else {
+                    break;
+                }
+            }
+
+            // Find last blank line in this group
+            let line_count = editor.current_buffer().line_count();
+            while last_blank + 1 < line_count {
+                let next_blank = editor
+                    .current_buffer()
+                    .line(last_blank + 1)
+                    .map(|l| l.text().trim().is_empty())
+                    .unwrap_or(false);
+                if next_blank {
+                    last_blank += 1;
+                } else {
+                    break;
+                }
+            }
+
+            // Delete all but one blank line
+            let lines_to_delete = last_blank - first_blank;
+            for _ in 0..lines_to_delete {
+                if first_blank + 1 < editor.current_buffer().line_count() {
+                    editor.current_buffer_mut().delete_line(first_blank + 1);
+                }
+            }
+
+            if lines_to_delete > 0 {
+                editor.current_buffer_mut().set_modified(true);
+            }
+            editor.current_window_mut().set_cursor(first_blank, 0);
+        } else {
+            // On non-blank line: delete any blank lines immediately following
+            let line_count = editor.current_buffer().line_count();
+            let mut deleted = 0;
+
+            while cursor_line + 1 < editor.current_buffer().line_count() {
+                let next_blank = editor
+                    .current_buffer()
+                    .line(cursor_line + 1)
+                    .map(|l| l.text().trim().is_empty())
+                    .unwrap_or(false);
+                if next_blank {
+                    editor.current_buffer_mut().delete_line(cursor_line + 1);
+                    deleted += 1;
+                } else {
+                    break;
+                }
+            }
+
+            if deleted > 0 {
+                editor.current_buffer_mut().set_modified(true);
+            }
+        }
+
+        editor.ensure_cursor_visible();
+        Ok(CommandStatus::Success)
+    }
+
+    /// Insert spaces to next tab stop (M-i)
+    pub fn tab_to_tab_stop(editor: &mut EditorState, f: bool, n: i32) -> Result<CommandStatus> {
+        let tab_width = 8; // Standard tab width
+        let count = if f { n.max(1) } else { 1 };
+
+        for _ in 0..count {
+            let cursor_line = editor.current_window().cursor_line();
+            let cursor_col = editor.current_window().cursor_col();
+
+            // Calculate display column
+            let display_col = editor
+                .current_buffer()
+                .line(cursor_line)
+                .map(|l| l.byte_to_col(cursor_col))
+                .unwrap_or(0);
+
+            // Calculate spaces needed to reach next tab stop
+            let spaces_needed = tab_width - (display_col % tab_width);
+
+            // Insert spaces
+            for _ in 0..spaces_needed {
+                editor.insert_char(' ');
+            }
+        }
+
+        Ok(CommandStatus::Success)
+    }
+
+    /// Describe what command a key is bound to (M-?)
+    pub fn describe_key(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        // Show prompt and refresh
+        editor.display.set_message("Describe key: ");
+        editor.display.force_redraw();
+
+        // Read the key (may need multiple events for prefix keys)
+        let key = editor.read_key_for_describe()?;
+
+        if let Some(k) = key {
+            // Look up the binding
+            if let Some(name) = editor.key_table().lookup_name(k) {
+                editor.display.set_message(&format!("{} runs the command {}", k.display_name(), name));
+            } else if k.is_self_insert() {
+                editor.display.set_message(&format!("{} runs the command self-insert-command", k.display_name()));
+            } else {
+                editor.display.set_message(&format!("{} is not bound", k.display_name()));
+            }
+        } else {
+            editor.display.set_message("Aborted");
+            return Ok(CommandStatus::Abort);
         }
 
         Ok(CommandStatus::Success)

@@ -15,12 +15,12 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 | Category | Features |
 |----------|----------|
 | **Navigation** | Cursor (C-f/b/n/p, arrows), words (M-f/b), lines (C-a/e), pages (C-v, M-v), buffer (M-<, M->), paragraphs (M-{ M-}) |
-| **Editing** | Insert, delete (C-d, Backspace), kill line (C-k), yank (C-y), kill word (M-d), transpose (C-t), quote (C-q), fill paragraph (M-q), just-one-space (M-SPC) |
+| **Editing** | Insert, delete (C-d, Backspace), kill line (C-k), yank (C-y), kill word (M-d), transpose (C-t), quote (C-q), fill paragraph (M-q), just-one-space (M-SPC), delete-horizontal-space (M-\), delete-blank-lines (C-x C-o), tab-to-tab-stop (M-i) |
 | **Case** | Upcase word (M-u), downcase word (M-l), capitalize (M-c), upcase region (C-x C-u), downcase region (C-x C-l) |
 | **Mark/Region** | Set mark (C-space), kill region (C-w), copy region (M-w), exchange point/mark (C-x C-x) |
 | **Search** | Incremental search (C-s, C-r), query replace (M-%) |
 | **Files** | Open (C-x C-f), save (C-x C-s), quit (C-x C-c) |
-| **Buffers** | Switch (C-x b), list (C-x C-b), kill (C-x k), goto line (M-g), shell command (M-!), cursor position (C-x =) |
+| **Buffers** | Switch (C-x b), list (C-x C-b), kill (C-x k), goto line (M-g), shell command (M-!), cursor position (C-x =), describe-key (M-?) |
 | **Windows** | Split (C-x 2), delete (C-x 0/1), switch (C-x o) |
 | **Undo** | Undo (C-/ or C-_) with operation grouping |
 | **Macros** | Record (C-x (), stop (C-x )), execute (C-x e) |
@@ -43,7 +43,10 @@ M-f/b  word fwd/back     C-w    kill region      C-x b    switch buffer
 C-v    page down         M-w    copy region      C-x k    kill buffer
 M-v    page up           C-t    transpose        C-x C-c  quit
 M-</>  buffer start/end  C-q    quote char       C-x =    cursor position
-M-{/}  paragraph         M-SPC  just one space
+M-{/}  paragraph         M-SPC  just one space   M-?      describe key
+                         M-\    del horiz space
+                         M-i    tab to tab stop
+                         C-x C-o del blank lines
 
 Search:              Windows:              Case:
 C-s    search fwd        C-x 2  split            M-u    upcase word

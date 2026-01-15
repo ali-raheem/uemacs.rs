@@ -1,6 +1,25 @@
 # uEmacs-rs
 
+[![Crates.io](https://img.shields.io/crates/v/uemacs.svg)](https://crates.io/crates/uemacs)
+[![License](https://img.shields.io/crates/l/uemacs.svg)](https://github.com/ali-raheem/uemacs.rs/blob/master/LICENSE.txt)
+
 A Rust port of [uEmacs/PK](https://git.kernel.org/pub/scm/editors/uemacs/uemacs.git), the lightweight Emacs-style text editor.
+
+## Installation
+
+### From crates.io (Recommended)
+
+```bash
+cargo install uemacs
+```
+
+### From source
+
+```bash
+git clone https://github.com/ali-raheem/uemacs.rs.git
+cd uemacs.rs
+cargo build --release
+```
 
 ## Features
 
@@ -16,20 +35,22 @@ A Rust port of [uEmacs/PK](https://git.kernel.org/pub/scm/editors/uemacs/uemacs.
 - UTF-8/Unicode text handling
 - Cross-platform (Windows, Linux, macOS)
 
-## Building
-
-```bash
-cargo build --release
-```
-
 ## Usage
 
 ```bash
 # Open a file
-cargo run --release -- filename.txt
+uemacs filename.txt
 
 # Or run without a file (starts with *scratch* buffer)
-cargo run --release
+uemacs
+
+# Show help
+uemacs --help
+```
+
+If running from source:
+```bash
+cargo run --release -- filename.txt
 ```
 
 ## Key Bindings
@@ -51,4 +72,4 @@ cargo run --release
 
 ## License
 
-Based on uEmacs/PK 4.0. See original source for license details.
+Based on uEmacs/PK 4.0 by Petri Kutvonen, which is based on MicroEMACS 3.9 by Daniel M. Lawrence. Free for non-commercial use. See [LICENSE.txt](LICENSE.txt) for details.

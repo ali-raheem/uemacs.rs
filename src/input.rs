@@ -93,6 +93,65 @@ impl Key {
             false
         }
     }
+
+    /// Convert key to a human-readable string (e.g., "C-f", "M-x", "C-x C-s")
+    pub fn display_name(&self) -> String {
+        let mut result = String::new();
+
+        // Handle C-x prefix
+        if self.is_ctlx() {
+            result.push_str("C-x ");
+        }
+
+        // Handle Meta prefix
+        if self.is_meta() {
+            result.push_str("M-");
+        }
+
+        // Handle Control prefix (not C-x, that's handled above)
+        if self.is_ctrl() && !self.is_ctlx() {
+            result.push_str("C-");
+        } else if self.is_ctrl() && self.is_ctlx() {
+            // C-x C-something
+            result.push_str("C-");
+        }
+
+        // Handle special keys
+        if self.is_special() {
+            let code = self.0 & 0xFF;
+            let special_name = match code {
+                0x47 => "Home",
+                0x48 => "Up",
+                0x49 => "PageUp",
+                0x4b => "Left",
+                0x4d => "Right",
+                0x4f => "End",
+                0x50 => "Down",
+                0x51 => "PageDown",
+                0x53 => "Delete",
+                n if n >= 0x3b && n <= 0x44 => {
+                    return format!("{}F{}", result, n - 0x3a);
+                }
+                _ => return format!("{}special-0x{:02x}", result, code),
+            };
+            result.push_str(special_name);
+            return result;
+        }
+
+        // Handle base character
+        let base = self.0 & 0x00FF_FFFF;
+        if base == 0x7f {
+            result.push_str("Backspace");
+        } else if base == 0x20 {
+            result.push_str("SPC");
+        } else if let Some(ch) = char::from_u32(base) {
+            result.push(ch);
+        } else {
+            result.push_str(&format!("0x{:x}", base));
+        }
+
+        result
+    }
 }
 
 /// Input state for handling multi-key sequences
