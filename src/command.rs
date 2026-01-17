@@ -428,6 +428,8 @@ pub mod commands {
             return delete_char_backward(editor, f, -n);
         }
 
+        editor.display.force_redraw();
+
         // Start kill if argument provided
         if f {
             editor.start_kill();
@@ -469,6 +471,8 @@ pub mod commands {
             return delete_char_forward(editor, f, -n);
         }
 
+        editor.display.force_redraw();
+
         if f {
             editor.start_kill();
         }
@@ -509,6 +513,7 @@ pub mod commands {
     /// Kill to end of line
     pub fn kill_line(editor: &mut EditorState, f: bool, n: i32) -> Result<CommandStatus> {
         editor.start_kill();
+        editor.display.force_redraw();
 
         let cursor_line = editor.current_window().cursor_line();
         let cursor_col = editor.current_window().cursor_col();
@@ -1097,6 +1102,7 @@ pub mod commands {
         }
 
         editor.start_kill();
+        editor.display.force_redraw();
 
         for _ in 0..n.max(1) {
             let start_line = editor.current_window().cursor_line();
@@ -1166,6 +1172,7 @@ pub mod commands {
         }
 
         editor.start_kill();
+        editor.display.force_redraw();
 
         for _ in 0..n.max(1) {
             let end_line = editor.current_window().cursor_line();
@@ -1310,6 +1317,7 @@ pub mod commands {
             }
         };
 
+        editor.display.force_redraw();
         let (start_line, start_col, end_line, end_col) = region;
 
         // Collect the text first
