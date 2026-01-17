@@ -64,6 +64,7 @@ pub struct PrefixArg {
 pub enum PromptAction {
     None,
     FindFile,
+    InsertFile,           // Insert file contents at cursor
     SwitchBuffer,
     KillBuffer,
     GotoLine,
@@ -72,6 +73,7 @@ pub enum PromptAction {
     ReplaceStringSearch,  // Non-interactive replace: enter search string
     ReplaceStringReplace, // Non-interactive replace: enter replacement string
     ShellCommand,         // Execute shell command
+    FilterBuffer,         // Pipe buffer through shell command
 }
 
 /// Minibuffer prompt state
@@ -171,10 +173,12 @@ impl Default for QueryReplaceState {
 pub struct MacroState {
     /// Whether we're recording a macro
     pub recording: bool,
-    /// Recorded key sequence
+    /// Recorded key sequence (current macro)
     pub keys: Vec<Key>,
     /// Whether we're playing back (to prevent recursion)
     pub playing: bool,
+    /// Named macro slots (0-9)
+    pub slots: [Vec<Key>; 10],
 }
 
 impl EditorState {
@@ -1376,6 +1380,19 @@ impl EditorState {
                 }
                 self.execute_shell_command(&input);
             }
+            PromptAction::InsertFile => {
+                if input.is_empty() {
+                    self.display.set_message("No file name");
+                    return Ok(());
+                }
+                self.insert_file(&input);
+            }
+            PromptAction::FilterBuffer => {
+                if input.is_empty() {
+                    return Ok(());
+                }
+                self.filter_buffer(&input);
+            }
             PromptAction::None => {}
         }
         Ok(())
@@ -1966,5 +1983,174 @@ impl EditorState {
         self.macro_state.playing = false;
 
         Ok(())
+    }
+
+    /// Save current macro to a numbered slot (0-9)
+    pub fn save_macro_to_slot(&mut self, slot: usize) {
+        if slot > 9 {
+            self.display.set_message("Invalid macro slot (use 0-9)");
+            return;
+        }
+        if self.macro_state.keys.is_empty() {
+            self.display.set_message("No macro to save");
+            return;
+        }
+        self.macro_state.slots[slot] = self.macro_state.keys.clone();
+        self.display.set_message(&format!("Macro saved to slot {}", slot));
+    }
+
+    /// Load macro from a numbered slot (0-9) into current macro
+    pub fn load_macro_from_slot(&mut self, slot: usize) {
+        if slot > 9 {
+            self.display.set_message("Invalid macro slot (use 0-9)");
+            return;
+        }
+        if self.macro_state.slots[slot].is_empty() {
+            self.display.set_message(&format!("No macro in slot {}", slot));
+            return;
+        }
+        self.macro_state.keys = self.macro_state.slots[slot].clone();
+        let key_count = self.macro_state.keys.len();
+        self.display.set_message(&format!("Loaded macro from slot {} ({} keys)", slot, key_count));
+    }
+
+    /// Execute macro from a numbered slot (0-9)
+    pub fn execute_macro_slot(&mut self, slot: usize) -> Result<()> {
+        if slot > 9 {
+            self.display.set_message("Invalid macro slot (use 0-9)");
+            return Ok(());
+        }
+        if self.macro_state.playing {
+            return Ok(());
+        }
+        if self.macro_state.recording {
+            self.display.set_message("Can't execute macro while defining it");
+            return Ok(());
+        }
+        if self.macro_state.slots[slot].is_empty() {
+            self.display.set_message(&format!("No macro in slot {}", slot));
+            return Ok(());
+        }
+
+        let keys: Vec<Key> = self.macro_state.slots[slot].clone();
+
+        self.macro_state.playing = true;
+        for key in keys {
+            self.handle_key(key)?;
+            if !self.running {
+                break;
+            }
+        }
+        self.macro_state.playing = false;
+
+        Ok(())
+    }
+
+    /// Insert file contents at current cursor position
+    pub fn insert_file(&mut self, filename: &str) {
+        use std::fs;
+        use std::path::Path;
+
+        let path = Path::new(filename);
+        match fs::read_to_string(path) {
+            Ok(content) => {
+                let line_count_before = self.current_buffer().line_count();
+
+                // Insert the content at cursor position
+                for ch in content.chars() {
+                    if ch == '\n' {
+                        let cursor_line = self.current_window().cursor_line();
+                        let cursor_col = self.current_window().cursor_col();
+                        self.current_buffer_mut()
+                            .insert_newline(cursor_line, cursor_col);
+                        self.current_window_mut().set_cursor(cursor_line + 1, 0);
+                    } else if ch != '\r' {
+                        // Skip carriage returns (handle Windows line endings)
+                        self.insert_char(ch);
+                    }
+                }
+
+                let lines_inserted = self.current_buffer().line_count() - line_count_before;
+                self.current_buffer_mut().set_modified(true);
+                self.ensure_cursor_visible();
+                self.display.set_message(&format!(
+                    "Inserted {} lines from {}",
+                    lines_inserted, filename
+                ));
+            }
+            Err(e) => {
+                self.display.set_message(&format!("Error reading {}: {}", filename, e));
+            }
+        }
+    }
+
+    /// Filter buffer contents through a shell command
+    pub fn filter_buffer(&mut self, command: &str) {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        // Collect buffer content
+        let mut content = String::new();
+        let line_count = self.current_buffer().line_count();
+        for i in 0..line_count {
+            if let Some(line) = self.current_buffer().line(i) {
+                content.push_str(line.text());
+                if i + 1 < line_count {
+                    content.push('\n');
+                }
+            }
+        }
+
+        // Run command with buffer as stdin
+        #[cfg(windows)]
+        let result = Command::new("cmd")
+            .args(["/C", command])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+
+        #[cfg(not(windows))]
+        let result = Command::new("sh")
+            .args(["-c", command])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+
+        match result {
+            Ok(mut child) => {
+                // Write content to stdin
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(content.as_bytes());
+                }
+
+                // Wait for output
+                match child.wait_with_output() {
+                    Ok(output) => {
+                        let new_content = String::from_utf8_lossy(&output.stdout);
+
+                        // Replace buffer content
+                        self.current_buffer_mut().set_content(&new_content);
+                        self.current_window_mut().set_cursor(0, 0);
+                        self.current_window_mut().set_top_line(0);
+                        self.current_buffer_mut().set_modified(true);
+                        self.display.force_redraw();
+
+                        let new_line_count = self.current_buffer().line_count();
+                        self.display.set_message(&format!(
+                            "Filter complete: {} lines",
+                            new_line_count
+                        ));
+                    }
+                    Err(e) => {
+                        self.display.set_message(&format!("Filter error: {}", e));
+                    }
+                }
+            }
+            Err(e) => {
+                self.display.set_message(&format!("Failed to run command: {}", e));
+            }
+        }
     }
 }

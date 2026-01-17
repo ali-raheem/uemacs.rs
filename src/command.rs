@@ -146,6 +146,7 @@ impl KeyTable {
 
         // File operations
         self.bind_named(Key::ctlx_ctrl('s'), save_buffer, "save-buffer");
+        self.bind_named(Key::ctlx('i'), insert_file, "insert-file"); // C-x i
 
         // Word operations
         self.bind_named(Key::meta('f'), forward_word, "forward-word");
@@ -197,11 +198,14 @@ impl KeyTable {
 
         // Shell
         self.bind_named(Key::meta('!'), shell_command, "shell-command");  // M-!
+        self.bind_named(Key::ctlx('|'), filter_buffer, "shell-command-on-region"); // C-x |
 
         // Keyboard macros
         self.bind_named(Key::ctlx('('), start_macro, "kmacro-start-macro");    // C-x (
         self.bind_named(Key::ctlx(')'), end_macro, "kmacro-end-macro");      // C-x )
         self.bind_named(Key::ctlx('e'), execute_macro, "kmacro-end-and-call-macro");  // C-x e
+        self.bind_named(Key(key_flags::CTLX | key_flags::META | 's' as u32), store_macro, "store-kbd-macro"); // C-x M-s
+        self.bind_named(Key(key_flags::CTLX | key_flags::META | 'l' as u32), load_macro, "load-kbd-macro"); // C-x M-l
 
         // Case operations
         self.bind_named(Key::meta('u'), upcase_word, "upcase-word");       // M-u
@@ -1218,6 +1222,18 @@ pub mod commands {
         Ok(CommandStatus::Success)
     }
 
+    /// Insert file contents at cursor (C-x i)
+    pub fn insert_file(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.start_prompt("Insert file", crate::editor::PromptAction::InsertFile, None);
+        Ok(CommandStatus::Success)
+    }
+
+    /// Filter buffer through shell command (C-x |)
+    pub fn filter_buffer(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.start_prompt("Filter through", crate::editor::PromptAction::FilterBuffer, None);
+        Ok(CommandStatus::Success)
+    }
+
     /// Kill buffer
     pub fn kill_buffer(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
         // Default to current buffer
@@ -1386,13 +1402,75 @@ pub mod commands {
     }
 
     /// Execute the keyboard macro (C-x e)
-    pub fn execute_macro(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
-        // Execute n times (or 1 if no argument)
+    pub fn execute_macro(editor: &mut EditorState, f: bool, n: i32) -> Result<CommandStatus> {
+        // With prefix arg 0-9, execute from that slot
+        if f && n >= 0 && n <= 9 {
+            editor.execute_macro_slot(n as usize)?;
+            return Ok(CommandStatus::Success);
+        }
+
+        // Otherwise execute n times (or 1 if no argument)
         let count = if n > 0 { n } else { 1 };
         for _ in 0..count {
             editor.execute_macro()?;
         }
         Ok(CommandStatus::Success)
+    }
+
+    /// Save current macro to a numbered slot (C-x C-k s, then digit)
+    pub fn store_macro(editor: &mut EditorState, f: bool, n: i32) -> Result<CommandStatus> {
+        // With prefix arg, use that slot
+        if f && n >= 0 && n <= 9 {
+            editor.save_macro_to_slot(n as usize);
+            return Ok(CommandStatus::Success);
+        }
+
+        // Without prefix arg, prompt (using slot 0 as default)
+        editor.display.set_message("Store macro to slot (0-9): ");
+        editor.display.force_redraw();
+
+        // Read a digit
+        if let Ok(key) = editor.read_key_for_describe() {
+            if let Some(k) = key {
+                if let Some(ch) = k.base_char() {
+                    if let Some(digit) = ch.to_digit(10) {
+                        editor.save_macro_to_slot(digit as usize);
+                        return Ok(CommandStatus::Success);
+                    }
+                }
+            }
+        }
+
+        editor.display.set_message("Aborted");
+        Ok(CommandStatus::Abort)
+    }
+
+    /// Load macro from a numbered slot (C-x C-k l, then digit)
+    pub fn load_macro(editor: &mut EditorState, f: bool, n: i32) -> Result<CommandStatus> {
+        // With prefix arg, use that slot
+        if f && n >= 0 && n <= 9 {
+            editor.load_macro_from_slot(n as usize);
+            return Ok(CommandStatus::Success);
+        }
+
+        // Without prefix arg, prompt
+        editor.display.set_message("Load macro from slot (0-9): ");
+        editor.display.force_redraw();
+
+        // Read a digit
+        if let Ok(key) = editor.read_key_for_describe() {
+            if let Some(k) = key {
+                if let Some(ch) = k.base_char() {
+                    if let Some(digit) = ch.to_digit(10) {
+                        editor.load_macro_from_slot(digit as usize);
+                        return Ok(CommandStatus::Success);
+                    }
+                }
+            }
+        }
+
+        editor.display.set_message("Aborted");
+        Ok(CommandStatus::Abort)
     }
 
     /// Uppercase word at cursor (M-u)

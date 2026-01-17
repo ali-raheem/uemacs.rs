@@ -39,6 +39,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Navigation Enhancements**
   - `M-C-f` - Goto matching fence (jump to matching bracket, paren, or brace)
 
+- **File Operations**
+  - `C-x i` - Insert file (insert file contents at cursor position)
+
+- **Shell Integration**
+  - `C-x |` - Filter buffer (pipe buffer contents through shell command)
+
+- **Macro Enhancements**
+  - `C-x M-s` - Store macro to slot (save current macro to slot 0-9)
+  - `C-x M-l` - Load macro from slot (load macro from slot 0-9)
+  - `C-u <n> C-x e` - Execute macro from slot n (0-9)
+
 - **Search Enhancements**
   - `M-r` - Replace string (non-interactive search and replace all)
   - `M-s` - Hunt forward (repeat last search forward)

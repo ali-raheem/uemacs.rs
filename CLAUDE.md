@@ -19,19 +19,20 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 | **Case** | Upcase word (M-u), downcase word (M-l), capitalize (M-c), upcase region (C-x C-u), downcase region (C-x C-l) |
 | **Mark/Region** | Set mark (C-space), kill region (C-w), copy region (M-w), exchange point/mark (C-x C-x) |
 | **Search** | Incremental search (C-s, C-r), query replace (M-%), replace-string (M-r), hunt forward/backward (M-s, M-S) |
-| **Files** | Open (C-x C-f), save (C-x C-s), quit (C-x C-c) |
+| **Files** | Open (C-x C-f), save (C-x C-s), insert (C-x i), quit (C-x C-c) |
+| **Shell** | Shell command (M-!), filter buffer (C-x \|) |
 | **Buffers** | Switch (C-x b), list (C-x C-b), kill (C-x k), next/prev (C-x n/p), goto line (M-g), shell command (M-!) |
 | **Info/Help** | Cursor position (C-x =), describe-key (M-?), describe-bindings (F1), word-count (M-=) |
 | **Windows** | Split (C-x 2), delete (C-x 0/1), switch (C-x o), enlarge (C-x ^), shrink (C-x v) |
 | **Undo** | Undo (C-/ or C-_) with operation grouping |
-| **Macros** | Record (C-x (), stop (C-x )), execute (C-x e) |
+| **Macros** | Record (C-x (), stop (C-x )), execute (C-x e), store to slot (C-x M-s), load from slot (C-x M-l) |
 | **Prefix** | Universal argument (C-u) for repeat counts |
 
 ### Potential Future Enhancements
-- Named macros and macro persistence
 - Rectangle operations
 - Customizable key bindings file
-- Tab/detab operations
+- M-x command execution by name
+- Auto-save
 
 ### Key Bindings Quick Reference
 
@@ -61,6 +62,8 @@ Macros:              Mark/Region:          Buffers:
 C-x (  start recording   C-space  set mark       C-x n  next buffer
 C-x )  stop recording    C-x C-x  exchange       C-x p  prev buffer
 C-x e  execute macro
+C-x M-s store to slot    Files:                Shell:
+C-x M-l load from slot   C-x i  insert file     C-x |  filter buffer
 
 Help/Info:           Navigation:           Other:
 F1     describe bindings M-C-f  match fence    C-u      prefix arg
