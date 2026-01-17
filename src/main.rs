@@ -1,4 +1,4 @@
-//! uEmacs - MicroEMACS text editor ported to Rust
+//! uEmacs.rs - MicroEMACS text editor ported to Rust
 //!
 //! Based on uEmacs/PK 4.0 by Petri Kutvonen
 
@@ -68,6 +68,8 @@ fn run() -> Result<()> {
 }
 
 fn print_usage() {
+    println!("uEmacs.rs {} - MicroEMACS text editor in Rust", env!("CARGO_PKG_VERSION"));
+    println!();
     println!("Usage: uemacs [OPTIONS] [FILE]");
     println!();
     println!("Options:");
@@ -89,14 +91,16 @@ fn print_usage() {
     println!("  C-l            Redraw screen");
     println!("  C-g            Abort current operation");
     println!("  C-x C-c        Quit");
+    println!();
+    println!("Press F1 in editor for complete key binding list");
 }
 
 fn print_version() {
-    println!("uemacs {}", env!("CARGO_PKG_VERSION"));
+    println!("uEmacs.rs {}", env!("CARGO_PKG_VERSION"));
     println!("A Rust port of uEmacs/PK 4.0");
     println!();
     println!("Original MicroEMACS by Dave G. Conroy");
     println!("Modified by Daniel M. Lawrence");
     println!("Enhanced by Petri H. Kutvonen");
-    println!("Rust port by Claude");
+    println!("Rust port by Ali Raheem & Claude");
 }

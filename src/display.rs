@@ -151,10 +151,10 @@ impl Display {
             format!("{}%", cursor_line * 100 / line_count)
         };
 
-        // Format: -- uEmacs: buffername (filename) --line-- percent --
+        // Format: -- uEmacs.rs: buffername (filename) --line-- percent --
         let indicator = if is_current { "=" } else { "-" };
         let mode_line = format!(
-            "{}{} uEmacs: {} ({}) L{} {} {}",
+            "{}{} uEmacs.rs: {} ({}) L{} {} {}",
             modified,
             indicator,
             name,
