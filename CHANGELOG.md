@@ -57,6 +57,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Additional Navigation**
   - `M-m` - Back to indentation (move to first non-whitespace on line)
+  - `C-x l` - What line (display current line number)
+
+- **Line Joining**
+  - `M-^` - Delete indentation / join line (join current line to previous, removing leading whitespace)
+
+- **Window Operations (Multi-window)**
+  - `M-C-v` - Scroll other window (scroll the other window down)
+
+- **Transpose Operations**
+  - `M-t` - Transpose words (swap word before cursor with word after)
+  - `C-x C-t` - Transpose lines (swap current line with previous line)
+
+- **Mark Operations**
+  - `M-h` - Mark paragraph (set mark at paragraph start, point at end)
+  - `M-@` - Mark word (set mark at point, move forward by word)
+
+- **Kill Ring Enhancements**
+  - `M-y` - Yank-pop (cycle through kill ring after yank)
+  - `M-C-k` - Kill paragraph (kill from point to end of paragraph)
+  - Consecutive kills now properly append to kill ring
 
 - **Additional Editing**
   - `M-z` - Zap to char (delete from cursor up to and including specified character)

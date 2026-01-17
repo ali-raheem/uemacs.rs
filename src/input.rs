@@ -40,6 +40,11 @@ impl Key {
         Key(key_flags::CTLX | key_flags::CONTROL | ch.to_ascii_lowercase() as u32)
     }
 
+    /// Create a C-x M-x key (C-x ESC x or C-x Alt-x)
+    pub fn ctlx_meta(ch: char) -> Self {
+        Key(key_flags::CTLX | key_flags::META | ch.to_ascii_lowercase() as u32)
+    }
+
     /// Create a special key (function keys, etc.)
     pub fn special(code: u32) -> Self {
         Key(key_flags::SPEC | code)

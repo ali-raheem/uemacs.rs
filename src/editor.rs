@@ -34,6 +34,10 @@ pub struct EditorState {
     pub kill_ring_idx: usize,
     /// Track consecutive kills for appending
     pub last_was_kill: bool,
+    /// Track last yank position for yank-pop
+    pub last_yank_start: Option<(usize, usize)>,
+    pub last_yank_end: Option<(usize, usize)>,
+    pub last_was_yank: bool,
     /// Waiting for literal character (C-q)
     pub quote_pending: bool,
     /// Incremental search state
@@ -206,6 +210,9 @@ impl EditorState {
             kill_ring: Vec::new(),
             kill_ring_idx: 0,
             last_was_kill: false,
+            last_yank_start: None,
+            last_yank_end: None,
+            last_was_yank: false,
             quote_pending: false,
             search: SearchState::default(),
             prompt: PromptState::default(),
@@ -446,6 +453,11 @@ impl EditorState {
         // Clear prefix arg before executing (so command sees clean state)
         self.prefix_arg = PrefixArg::default();
         self.display.clear_message();
+
+        // Clear kill/yank flags - commands will set them if needed
+        // This ensures consecutive kills append but non-consecutive kills don't
+        self.last_was_kill = false;
+        self.last_was_yank = false;
 
         // Look up command
         if let Some(cmd) = self.keytab.lookup(key) {
@@ -857,6 +869,30 @@ impl EditorState {
     /// Get text for yanking
     pub fn yank_text(&self) -> Option<&str> {
         self.kill_ring.last().map(|s| s.as_str())
+    }
+
+    /// Get text at specific kill ring index (0 = most recent)
+    pub fn yank_text_at(&self, idx: usize) -> Option<&str> {
+        if self.kill_ring.is_empty() {
+            return None;
+        }
+        let len = self.kill_ring.len();
+        let actual_idx = len.saturating_sub(1).saturating_sub(idx % len);
+        self.kill_ring.get(actual_idx).map(|s| s.as_str())
+    }
+
+    /// Cycle kill ring index for yank-pop (returns new index)
+    pub fn cycle_kill_ring(&mut self) -> usize {
+        if self.kill_ring.is_empty() {
+            return 0;
+        }
+        self.kill_ring_idx = (self.kill_ring_idx + 1) % self.kill_ring.len();
+        self.kill_ring_idx
+    }
+
+    /// Reset kill ring index to most recent
+    pub fn reset_kill_ring_idx(&mut self) {
+        self.kill_ring_idx = 0;
     }
 
     /// Clear the kill flag (called after non-kill commands)

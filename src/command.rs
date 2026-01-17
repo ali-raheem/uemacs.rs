@@ -137,6 +137,7 @@ impl KeyTable {
 
         self.bind_named(Key::ctrl('k'), kill_line, "kill-line");
         self.bind_named(Key::ctrl('y'), yank, "yank");
+        self.bind_named(Key::meta('y'), yank_pop, "yank-pop");
 
         self.bind_named(Key::ctrl('m'), newline, "newline");    // Enter
         self.bind_named(Key::ctrl('o'), open_line, "open-line");
@@ -214,8 +215,8 @@ impl KeyTable {
         self.bind_named(Key::ctlx('('), start_macro, "kmacro-start-macro");    // C-x (
         self.bind_named(Key::ctlx(')'), end_macro, "kmacro-end-macro");      // C-x )
         self.bind_named(Key::ctlx('e'), execute_macro, "kmacro-end-and-call-macro");  // C-x e
-        self.bind_named(Key(key_flags::CTLX | key_flags::META | 's' as u32), store_macro, "store-kbd-macro"); // C-x M-s
-        self.bind_named(Key(key_flags::CTLX | key_flags::META | 'l' as u32), load_macro, "load-kbd-macro"); // C-x M-l
+        self.bind_named(Key::ctlx_meta('s'), store_macro, "store-kbd-macro"); // C-x M-s
+        self.bind_named(Key::ctlx_meta('l'), load_macro, "load-kbd-macro"); // C-x M-l
 
         // Case operations
         self.bind_named(Key::meta('u'), upcase_word, "upcase-word");       // M-u
@@ -250,6 +251,26 @@ impl KeyTable {
 
         // Whitespace cleanup
         self.bind_named(Key::ctlx('t'), trim_line, "trim-line"); // C-x t
+
+        // Join/delete-indentation
+        self.bind_named(Key::meta('^'), join_line, "delete-indentation"); // M-^
+
+        // Scroll other window
+        self.bind_named(Key(key_flags::META | key_flags::CONTROL | 'v' as u32), scroll_other_window, "scroll-other-window"); // M-C-v
+
+        // Information
+        self.bind_named(Key::ctlx('l'), what_line, "what-line"); // C-x l
+
+        // Transpose operations
+        self.bind_named(Key::meta('t'), transpose_words, "transpose-words"); // M-t
+        self.bind_named(Key::ctlx_ctrl('t'), transpose_lines, "transpose-lines"); // C-x C-t
+
+        // Mark operations
+        self.bind_named(Key::meta('h'), mark_paragraph, "mark-paragraph"); // M-h
+        self.bind_named(Key::meta('@'), mark_word, "mark-word"); // M-@
+
+        // Kill operations
+        self.bind_named(Key(key_flags::META | key_flags::CONTROL | 'k' as u32), kill_paragraph, "kill-paragraph"); // M-C-k
     }
 }
 
@@ -538,6 +559,10 @@ pub mod commands {
             None => return Ok(CommandStatus::Success), // Nothing to yank
         };
 
+        // Track start position for yank-pop
+        let start_line = editor.current_window().cursor_line();
+        let start_col = editor.current_window().cursor_col();
+
         for _ in 0..n.max(1) {
             for ch in text.chars() {
                 if ch == '\n' {
@@ -553,6 +578,95 @@ pub mod commands {
             }
         }
 
+        // Track end position for yank-pop
+        let end_line = editor.current_window().cursor_line();
+        let end_col = editor.current_window().cursor_col();
+        editor.last_yank_start = Some((start_line, start_col));
+        editor.last_yank_end = Some((end_line, end_col));
+        editor.last_was_yank = true;
+        editor.reset_kill_ring_idx();
+
+        editor.ensure_cursor_visible();
+        Ok(CommandStatus::Success)
+    }
+
+    /// Cycle through kill ring after yank (M-y)
+    pub fn yank_pop(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        // Only works immediately after yank or yank-pop
+        if !editor.last_was_yank {
+            editor.display.set_message("Previous command was not a yank");
+            return Ok(CommandStatus::Failure);
+        }
+
+        let (start_line, start_col) = match editor.last_yank_start {
+            Some(pos) => pos,
+            None => return Ok(CommandStatus::Failure),
+        };
+
+        let (end_line, end_col) = match editor.last_yank_end {
+            Some(pos) => pos,
+            None => return Ok(CommandStatus::Failure),
+        };
+
+        // Cycle to next kill ring entry
+        let new_idx = editor.cycle_kill_ring();
+        let new_text = match editor.yank_text_at(new_idx) {
+            Some(t) => t.to_string(),
+            None => return Ok(CommandStatus::Failure),
+        };
+
+        // Delete the previous yank (from start to end)
+        // Work backwards to avoid index shifting issues
+        for line_idx in (start_line..=end_line).rev() {
+            if line_idx == start_line && line_idx == end_line {
+                // Same line
+                if let Some(line_mut) = editor.current_buffer_mut().line_mut(line_idx) {
+                    line_mut.delete_range(start_col, end_col);
+                }
+            } else if line_idx == end_line {
+                // End line - delete from beginning to end_col, then join
+                if let Some(line_mut) = editor.current_buffer_mut().line_mut(line_idx) {
+                    line_mut.delete_range(0, end_col);
+                }
+                if line_idx > 0 {
+                    editor.current_buffer_mut().join_line(line_idx - 1);
+                }
+            } else if line_idx == start_line {
+                // Start line - delete from start_col to end
+                if let Some(line_mut) = editor.current_buffer_mut().line_mut(line_idx) {
+                    let line_len = line_mut.len();
+                    line_mut.delete_range(start_col, line_len);
+                }
+            } else {
+                // Middle line - delete entire line
+                editor.current_buffer_mut().delete_line(line_idx);
+            }
+        }
+
+        // Move cursor to start position
+        editor.current_window_mut().set_cursor(start_line, start_col);
+
+        // Insert new text
+        for ch in new_text.chars() {
+            if ch == '\n' {
+                let cursor_line = editor.current_window().cursor_line();
+                let cursor_col = editor.current_window().cursor_col();
+                editor
+                    .current_buffer_mut()
+                    .insert_newline(cursor_line, cursor_col);
+                editor.current_window_mut().set_cursor(cursor_line + 1, 0);
+            } else {
+                editor.insert_char(ch);
+            }
+        }
+
+        // Update end position
+        let new_end_line = editor.current_window().cursor_line();
+        let new_end_col = editor.current_window().cursor_col();
+        editor.last_yank_end = Some((new_end_line, new_end_col));
+        editor.last_was_yank = true;
+
+        editor.current_buffer_mut().set_modified(true);
         editor.ensure_cursor_visible();
         Ok(CommandStatus::Success)
     }
@@ -2461,6 +2575,379 @@ pub mod commands {
             "{}: {} lines, {} words, {} characters",
             description, lines, words, chars
         ));
+
+        Ok(CommandStatus::Success)
+    }
+
+    /// Join current line to previous line, removing indentation (M-^ / delete-indentation)
+    pub fn join_line(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        for _ in 0..n.max(1) {
+            let cursor_line = editor.current_window().cursor_line();
+
+            if cursor_line == 0 {
+                // Can't join first line with previous
+                return Ok(CommandStatus::Failure);
+            }
+
+            // Get the length of the previous line (where we'll join)
+            let prev_line_len = editor
+                .current_buffer()
+                .line(cursor_line - 1)
+                .map(|l| l.len())
+                .unwrap_or(0);
+
+            // Check if previous line is empty (for space insertion decision)
+            let prev_line_empty = prev_line_len == 0;
+
+            // Get leading whitespace length of current line
+            let leading_ws_len = if let Some(line) = editor.current_buffer().line(cursor_line) {
+                let text = line.text();
+                let mut ws_len = 0;
+                for ch in text.chars() {
+                    if ch == ' ' || ch == '\t' {
+                        ws_len += ch.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+                ws_len
+            } else {
+                0
+            };
+
+            // Delete leading whitespace from current line first
+            if leading_ws_len > 0 {
+                if let Some(line_mut) = editor.current_buffer_mut().line_mut(cursor_line) {
+                    line_mut.delete_range(0, leading_ws_len);
+                }
+                editor.current_buffer_mut().set_modified(true);
+            }
+
+            // Join with previous line
+            if let Some(join_pos) = editor.current_buffer_mut().join_with_previous(cursor_line) {
+                // Insert a single space at the join point if previous line wasn't empty
+                // and there's actual content after the join
+                let should_add_space = !prev_line_empty
+                    && editor
+                        .current_buffer()
+                        .line(cursor_line - 1)
+                        .map(|l| l.len() > join_pos)
+                        .unwrap_or(false);
+
+                if should_add_space {
+                    editor
+                        .current_buffer_mut()
+                        .insert_char(cursor_line - 1, join_pos, ' ');
+                    editor
+                        .current_window_mut()
+                        .set_cursor(cursor_line - 1, join_pos + 1);
+                } else {
+                    editor
+                        .current_window_mut()
+                        .set_cursor(cursor_line - 1, join_pos);
+                }
+            }
+        }
+
+        Ok(CommandStatus::Success)
+    }
+
+    /// Scroll the other window (M-C-v)
+    pub fn scroll_other_window(editor: &mut EditorState, f: bool, n: i32) -> Result<CommandStatus> {
+        if editor.windows.len() <= 1 {
+            editor.display.set_message("No other window");
+            return Ok(CommandStatus::Failure);
+        }
+
+        // Find the other window index
+        let other_idx = if editor.current_window + 1 < editor.windows.len() {
+            editor.current_window + 1
+        } else {
+            0
+        };
+
+        // Get the other window's buffer's line count
+        let buf_idx = editor.windows[other_idx].buffer_idx();
+        let line_count = editor.buffers[buf_idx].line_count();
+        let height = editor.windows[other_idx].height() as usize;
+
+        // Calculate scroll amount
+        let scroll_amount = if f {
+            n.unsigned_abs() as usize
+        } else {
+            height.saturating_sub(2) // default page scroll
+        };
+
+        // Scroll the other window
+        if n >= 0 || !f {
+            // Scroll down
+            editor.windows[other_idx].scroll_down(scroll_amount, line_count);
+        } else {
+            // Scroll up (negative argument)
+            editor.windows[other_idx].scroll_up(scroll_amount);
+        }
+
+        editor.display.force_redraw();
+        Ok(CommandStatus::Success)
+    }
+
+    /// Display current line number (C-x l)
+    pub fn what_line(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        let cursor_line = editor.current_window().cursor_line();
+        let total_lines = editor.current_buffer().line_count();
+
+        editor.display.set_message(&format!(
+            "Line {} of {}",
+            cursor_line + 1, // Display as 1-indexed
+            total_lines
+        ));
+
+        Ok(CommandStatus::Success)
+    }
+
+    /// Transpose words (M-t)
+    pub fn transpose_words(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        for _ in 0..n.max(1) {
+            let cursor_line = editor.current_window().cursor_line();
+            let cursor_col = editor.current_window().cursor_col();
+
+            let text = match editor.current_buffer().line(cursor_line) {
+                Some(l) => l.text().to_string(),
+                None => return Ok(CommandStatus::Failure),
+            };
+
+            // Find word boundaries
+            let chars: Vec<(usize, char)> = text.char_indices().collect();
+            if chars.is_empty() {
+                return Ok(CommandStatus::Failure);
+            }
+
+            // Find current position in char indices
+            let cur_char_idx = chars
+                .iter()
+                .position(|(pos, _)| *pos >= cursor_col)
+                .unwrap_or(chars.len());
+
+            // Find first word end (the word before or at cursor)
+            let mut word1_end = cur_char_idx;
+            // Skip whitespace backward to find end of word1
+            while word1_end > 0 && chars.get(word1_end.saturating_sub(1)).map(|(_, c)| c.is_whitespace()).unwrap_or(true) {
+                word1_end = word1_end.saturating_sub(1);
+            }
+            if word1_end == 0 && chars.get(0).map(|(_, c)| c.is_whitespace()).unwrap_or(true) {
+                return Ok(CommandStatus::Failure);
+            }
+
+            // Find word1 start
+            let mut word1_start = word1_end;
+            while word1_start > 0 && !chars.get(word1_start.saturating_sub(1)).map(|(_, c)| c.is_whitespace()).unwrap_or(true) {
+                word1_start = word1_start.saturating_sub(1);
+            }
+
+            // Find word2 start (skip whitespace after word1_end)
+            let mut word2_start = word1_end;
+            while word2_start < chars.len() && chars.get(word2_start).map(|(_, c)| c.is_whitespace()).unwrap_or(false) {
+                word2_start += 1;
+            }
+            if word2_start >= chars.len() {
+                return Ok(CommandStatus::Failure);
+            }
+
+            // Find word2 end
+            let mut word2_end = word2_start;
+            while word2_end < chars.len() && !chars.get(word2_end).map(|(_, c)| c.is_whitespace()).unwrap_or(true) {
+                word2_end += 1;
+            }
+
+            // Get byte positions
+            let byte_word1_start = chars[word1_start].0;
+            let byte_word1_end = if word1_end < chars.len() {
+                chars[word1_end].0
+            } else {
+                text.len()
+            };
+            let byte_word2_start = chars[word2_start].0;
+            let byte_word2_end = if word2_end < chars.len() {
+                chars[word2_end].0
+            } else {
+                text.len()
+            };
+
+            // Extract words and whitespace
+            let word1 = &text[byte_word1_start..byte_word1_end];
+            let between = &text[byte_word1_end..byte_word2_start];
+            let word2 = &text[byte_word2_start..byte_word2_end];
+
+            // Build new text with swapped words
+            let mut new_text = String::new();
+            new_text.push_str(&text[..byte_word1_start]);
+            new_text.push_str(word2);
+            new_text.push_str(between);
+            new_text.push_str(word1);
+            new_text.push_str(&text[byte_word2_end..]);
+
+            // Update the line
+            if let Some(line_mut) = editor.current_buffer_mut().line_mut(cursor_line) {
+                *line_mut = crate::line::Line::from(new_text.clone());
+            }
+            editor.current_buffer_mut().set_modified(true);
+
+            // Move cursor to end of second word (now at word1's original position + word2's length)
+            let new_cursor = byte_word1_start + word2.len() + between.len() + word1.len();
+            editor.current_window_mut().set_cursor(cursor_line, new_cursor);
+        }
+
+        Ok(CommandStatus::Success)
+    }
+
+    /// Transpose lines (C-x C-t)
+    pub fn transpose_lines(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        for _ in 0..n.max(1) {
+            let cursor_line = editor.current_window().cursor_line();
+
+            if cursor_line == 0 {
+                // Can't transpose first line with nothing above
+                return Ok(CommandStatus::Failure);
+            }
+
+            let line_count = editor.current_buffer().line_count();
+            if cursor_line >= line_count {
+                return Ok(CommandStatus::Failure);
+            }
+
+            // Get both lines' text
+            let line1_text = editor
+                .current_buffer()
+                .line(cursor_line - 1)
+                .map(|l| l.text().to_string())
+                .unwrap_or_default();
+            let line2_text = editor
+                .current_buffer()
+                .line(cursor_line)
+                .map(|l| l.text().to_string())
+                .unwrap_or_default();
+
+            // Swap line contents
+            if let Some(line_mut) = editor.current_buffer_mut().line_mut(cursor_line - 1) {
+                *line_mut = crate::line::Line::from(line2_text);
+            }
+            if let Some(line_mut) = editor.current_buffer_mut().line_mut(cursor_line) {
+                *line_mut = crate::line::Line::from(line1_text);
+            }
+            editor.current_buffer_mut().set_modified(true);
+
+            // Move cursor to next line (or stay if at end)
+            if cursor_line + 1 < line_count {
+                editor.current_window_mut().set_cursor(cursor_line + 1, 0);
+            }
+        }
+
+        Ok(CommandStatus::Success)
+    }
+
+    /// Mark paragraph (M-h)
+    pub fn mark_paragraph(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        // Move to beginning of paragraph
+        editor.backward_paragraph();
+
+        // Set mark at paragraph start
+        editor.current_window_mut().set_mark();
+
+        // Move to end of paragraph
+        editor.forward_paragraph();
+
+        editor.display.set_message("Mark set");
+        Ok(CommandStatus::Success)
+    }
+
+    /// Mark word (M-@)
+    pub fn mark_word(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        // Set mark at current position
+        editor.current_window_mut().set_mark();
+
+        // Move forward by n words using the forward_word command
+        forward_word(editor, false, n)?;
+
+        editor.display.set_message("Mark set");
+        Ok(CommandStatus::Success)
+    }
+
+    /// Kill paragraph (M-C-k) - kill from point to end of paragraph
+    pub fn kill_paragraph(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        editor.start_kill();
+
+        for _ in 0..n.max(1) {
+            let start_line = editor.current_window().cursor_line();
+            let start_col = editor.current_window().cursor_col();
+
+            // Move to end of paragraph
+            editor.forward_paragraph();
+
+            let end_line = editor.current_window().cursor_line();
+            let end_col = editor.current_window().cursor_col();
+
+            // If we didn't move, nothing to kill
+            if start_line == end_line && start_col == end_col {
+                return Ok(CommandStatus::Failure);
+            }
+
+            // Collect and delete text from start to end
+            let mut deleted = String::new();
+
+            // Build the text that will be deleted
+            for line_idx in start_line..=end_line {
+                if let Some(line) = editor.current_buffer().line(line_idx) {
+                    let text = line.text();
+                    let start = if line_idx == start_line { start_col } else { 0 };
+                    let end = if line_idx == end_line { end_col } else { text.len() };
+
+                    if end > start && end <= text.len() {
+                        deleted.push_str(&text[start..end]);
+                    }
+                    if line_idx < end_line {
+                        deleted.push('\n');
+                    }
+                }
+            }
+
+            // Delete the region by working backwards
+            // First, delete content on lines between start and end
+            for line_idx in (start_line..=end_line).rev() {
+                if line_idx == start_line && line_idx == end_line {
+                    // Same line - just delete the range
+                    if let Some(line_mut) = editor.current_buffer_mut().line_mut(line_idx) {
+                        let text_len = line_mut.len();
+                        if end_col <= text_len {
+                            line_mut.delete_range(start_col, end_col);
+                        }
+                    }
+                } else if line_idx == end_line {
+                    // End line - delete from beginning to end_col
+                    if let Some(line_mut) = editor.current_buffer_mut().line_mut(line_idx) {
+                        line_mut.delete_range(0, end_col);
+                    }
+                    // Join with previous line
+                    if line_idx > 0 {
+                        editor.current_buffer_mut().join_line(line_idx - 1);
+                    }
+                } else if line_idx == start_line {
+                    // Start line - delete from start_col to end
+                    if let Some(line_mut) = editor.current_buffer_mut().line_mut(line_idx) {
+                        let line_len = line_mut.len();
+                        if start_col < line_len {
+                            line_mut.delete_range(start_col, line_len);
+                        }
+                    }
+                } else {
+                    // Middle line - delete entire line
+                    editor.current_buffer_mut().delete_line(line_idx);
+                }
+            }
+
+            editor.current_buffer_mut().set_modified(true);
+            editor.current_window_mut().set_cursor(start_line, start_col);
+            editor.kill_append(&deleted);
+        }
 
         Ok(CommandStatus::Success)
     }
