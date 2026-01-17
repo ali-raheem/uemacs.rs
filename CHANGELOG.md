@@ -44,6 +44,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Display**
   - `C-l` - Recenter (center cursor line on screen; with C-u n, put cursor on line n from top)
+  - `C-x #` - Toggle line numbers (show/hide line numbers in left margin)
+
+- **Extended Command**
+  - `M-x` - Execute extended command (run any command by name)
+
+- **Configuration**
+  - Configuration file support (`~/.uemacs.conf` or `%USERPROFILE%\.uemacs.conf` on Windows)
+  - Supported settings: `line-numbers`, `auto-save`, `auto-save-interval`, `tab-width`
 
 - **File Operations**
   - `C-x i` - Insert file (insert file contents at cursor position)

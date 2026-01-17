@@ -90,6 +90,7 @@ pub enum PromptAction {
     FilterRegion,         // Pipe region through shell command (output to buffer)
     FilterRegionReplace,  // Pipe region through shell command (replace region)
     WriteFile,            // Save buffer to a new filename
+    ExtendedCommand,      // M-x: execute command by name
 }
 
 /// Minibuffer prompt state
@@ -235,6 +236,19 @@ impl EditorState {
             auto_save_interval: Duration::from_secs(30),
             auto_save_enabled: true,
         }
+    }
+
+    /// Apply configuration settings
+    pub fn apply_config(&mut self, config: &crate::config::Config) {
+        // Display settings
+        self.display.show_line_numbers = config.show_line_numbers;
+
+        // Auto-save settings
+        self.auto_save_enabled = config.auto_save;
+        self.auto_save_interval = std::time::Duration::from_secs(config.auto_save_interval);
+
+        // Tab width is stored in Line, but we don't have a global tab width setting yet
+        // This could be added in the future
     }
 
     /// Open a file in a new buffer
@@ -1500,6 +1514,12 @@ impl EditorState {
                 }
                 self.write_file(&input);
             }
+            PromptAction::ExtendedCommand => {
+                if input.is_empty() {
+                    return Ok(());
+                }
+                self.execute_named_command(&input);
+            }
             PromptAction::None => {}
         }
         Ok(())
@@ -2037,6 +2057,40 @@ impl EditorState {
 
         self.display.force_redraw();
         self.display.set_message(&format!("Shell command: {}", command));
+    }
+
+    /// Execute a command by name (M-x)
+    pub fn execute_named_command(&mut self, name: &str) {
+        // Look up the command by name
+        let cmd_fn = self.keytab.lookup_by_name(name);
+
+        if let Some(cmd_fn) = cmd_fn {
+            // Execute with default arguments (no prefix, count=1)
+            match cmd_fn(self, false, 1) {
+                Ok(_) => {}
+                Err(e) => {
+                    self.display.set_message(&format!("Error: {}", e));
+                }
+            }
+        } else {
+            // Try to find partial matches for a helpful message
+            let names = self.keytab.command_names();
+            let matches: Vec<&str> = names.iter()
+                .filter(|n| n.contains(name))
+                .take(3)
+                .copied()
+                .collect();
+
+            if matches.is_empty() {
+                self.display.set_message(&format!("Unknown command: {}", name));
+            } else {
+                self.display.set_message(&format!(
+                    "Unknown command: {}. Did you mean: {}?",
+                    name,
+                    matches.join(", ")
+                ));
+            }
+        }
     }
 
     /// Start recording a keyboard macro

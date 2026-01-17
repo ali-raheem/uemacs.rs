@@ -11,6 +11,8 @@ pub struct Display {
     needs_redraw: bool,
     /// Message to show in minibuffer (bottom line)
     message: Option<String>,
+    /// Whether to show line numbers
+    pub show_line_numbers: bool,
 }
 
 impl Display {
@@ -18,7 +20,24 @@ impl Display {
         Self {
             needs_redraw: true,
             message: None,
+            show_line_numbers: false,
         }
+    }
+
+    /// Toggle line numbers on/off
+    pub fn toggle_line_numbers(&mut self) {
+        self.show_line_numbers = !self.show_line_numbers;
+        self.needs_redraw = true;
+    }
+
+    /// Calculate width needed for line numbers (including separator)
+    fn line_number_width(&self, line_count: usize) -> usize {
+        if !self.show_line_numbers {
+            return 0;
+        }
+        // Width of largest line number + 1 for separator space
+        let digits = if line_count == 0 { 1 } else { (line_count as f64).log10().floor() as usize + 1 };
+        digits.max(3) + 1 // minimum 3 digits + space
     }
 
     /// Mark that a full redraw is needed
@@ -90,6 +109,10 @@ impl Display {
         let height = window.height() as usize;
         let top_line = window.top_line();
 
+        // Calculate line number width
+        let lnum_width = self.line_number_width(buffer.line_count());
+        let text_cols = cols.saturating_sub(lnum_width);
+
         // Render each line in the window
         for row_offset in 0..height {
             let screen_row = top_row + row_offset as u16;
@@ -98,13 +121,26 @@ impl Display {
             terminal.move_cursor(screen_row, 0)?;
 
             if let Some(line) = buffer.line(line_idx) {
-                // Render line content, truncated to screen width
+                // Render line number if enabled
+                if self.show_line_numbers {
+                    let lnum_str = format!("{:>width$} ", line_idx + 1, width = lnum_width - 1);
+                    terminal.set_dim(true)?;
+                    terminal.write_str(&lnum_str)?;
+                    terminal.set_dim(false)?;
+                }
+
+                // Render line content, truncated to remaining screen width
                 let text = line.text();
-                let display_text = truncate_to_width(text, cols);
+                let display_text = truncate_to_width(text, text_cols);
                 terminal.write_str(&display_text)?;
             } else {
                 // Empty line indicator (like vim's ~)
+                if self.show_line_numbers {
+                    terminal.write_str(&" ".repeat(lnum_width))?;
+                }
+                terminal.set_dim(true)?;
                 terminal.write_char('~')?;
+                terminal.set_dim(false)?;
             }
 
             terminal.clear_to_eol()?;
@@ -217,6 +253,9 @@ impl Display {
             0
         };
 
+        // Account for line number width
+        let lnum_width = self.line_number_width(buffer.line_count());
+
         // Calculate screen position
         let screen_row = if cursor_line >= window.top_line() {
             window.top_row() + (cursor_line - window.top_line()) as u16
@@ -224,7 +263,7 @@ impl Display {
             window.top_row()
         };
 
-        let screen_col = display_col.min(terminal.cols() as usize - 1) as u16;
+        let screen_col = (lnum_width + display_col).min(terminal.cols() as usize - 1) as u16;
 
         terminal.move_cursor(screen_row, screen_col)?;
         Ok(())

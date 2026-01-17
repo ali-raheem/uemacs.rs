@@ -4,7 +4,11 @@
       "Bash(cargo init:*)",
       "Bash(ls:*)",
       "Bash(cargo build:*)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Bash(git -C D:/Code/uemacs diff --stat)",
+      "Bash(git -C D:/Code/uemacs log --oneline -5)",
+      "Bash(git -C D:/Code/uemacs push)",
+      "Bash(wc:*)"
     ]
   }
 }

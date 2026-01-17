@@ -4,6 +4,7 @@
 
 mod buffer;
 mod command;
+mod config;
 mod display;
 mod editor;
 mod error;
@@ -16,6 +17,7 @@ use std::env;
 use std::path::PathBuf;
 use std::process;
 
+use config::Config;
 use editor::EditorState;
 use error::Result;
 use terminal::Terminal;
@@ -46,11 +48,17 @@ fn run() -> Result<()> {
         }
     }
 
+    // Load configuration
+    let config = Config::load();
+
     // Initialize terminal
     let terminal = Terminal::new()?;
 
     // Create editor state
     let mut editor = EditorState::new(terminal);
+
+    // Apply configuration
+    editor.apply_config(&config);
 
     // Open file if provided
     if args.len() > 1 && !args[1].starts_with('-') {

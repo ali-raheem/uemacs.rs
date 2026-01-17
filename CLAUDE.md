@@ -28,6 +28,9 @@ A complete rewrite of uEmacs/PK 4.0 in Rust for modern platforms. This is a stan
 | **Macros** | Record (C-x (), stop (C-x )), execute (C-x e), store to slot (C-x M-s), load from slot (C-x M-l) |
 | **Prefix** | Universal argument (C-u), digit argument (M-0 to M-9), negative argument (M--) |
 | **Auto-Save** | Periodic auto-save (30s), toggle (C-x a), Emacs-style #file# naming |
+| **Display** | Line numbers toggle (C-x #) |
+| **Extended** | M-x execute command by name with partial match suggestions |
+| **Config** | Config file (~/.uemacs.conf) for persistent settings |
 
 ### Potential Future Enhancements
 
@@ -48,7 +51,7 @@ A complete rewrite of uEmacs/PK 4.0 in Rust for modern platforms. This is a stan
 **Other Features**
 - Rectangle operations
 - Customizable key bindings file
-- M-x command execution by name
+- Syntax highlighting
 
 ### Key Bindings Quick Reference
 
@@ -88,6 +91,7 @@ M-?    describe key      M-{/}  paragraph      C-g      abort
 M-=    word count                               C-l      recenter
 C-x =  cursor position                          C-/ C-_  undo
 C-x t  trim line                                C-x a    auto-save toggle
+M-x    execute command                          C-x #    toggle line numbers
 ```
 
 ## Build Commands
@@ -109,10 +113,11 @@ cargo run -- file.txt    # Open file
 | Buffer | `src/buffer.rs` | Text storage, editing ops, undo stack |
 | Window | `src/window.rs` | Viewport into buffer with cursor |
 | Terminal | `src/terminal.rs` | Crossterm-based terminal I/O |
-| Display | `src/display.rs` | Screen rendering, mode line |
+| Display | `src/display.rs` | Screen rendering, mode line, line numbers |
 | Input | `src/input.rs` | Key translation, prefix handling |
 | Command | `src/command.rs` | Command functions, key bindings |
 | Editor | `src/editor.rs` | Main state, event loop |
+| Config | `src/config.rs` | Configuration file loading |
 | Error | `src/error.rs` | Error types |
 
 ### Key Design Patterns

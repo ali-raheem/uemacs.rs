@@ -89,6 +89,25 @@ impl KeyTable {
         bindings
     }
 
+    /// Look up a command by name (returns first matching binding)
+    pub fn lookup_by_name(&self, name: &str) -> Option<CommandFn> {
+        self.bindings
+            .values()
+            .find(|entry| entry.name == name)
+            .map(|entry| entry.function)
+    }
+
+    /// Get all unique command names (sorted)
+    pub fn command_names(&self) -> Vec<&'static str> {
+        let mut names: Vec<_> = self.bindings
+            .values()
+            .map(|entry| entry.name)
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
     /// Set up default key bindings
     fn setup_defaults(&mut self) {
         use commands::*;
@@ -121,6 +140,7 @@ impl KeyTable {
 
         // Screen refresh
         self.bind_named(Key::ctrl('l'), redraw_display, "redraw-display");
+        self.bind_named(Key::ctlx('#'), toggle_line_numbers, "toggle-line-numbers"); // C-x #
 
         // Quit
         self.bind_named(Key::ctlx_ctrl('c'), quit, "save-buffers-kill-emacs");
@@ -212,6 +232,9 @@ impl KeyTable {
         self.bind_named(Key::meta('!'), shell_command, "shell-command");  // M-!
         self.bind_named(Key::meta('|'), shell_command_on_region, "shell-command-on-region"); // M-|
         self.bind_named(Key::ctlx('|'), filter_buffer, "filter-buffer"); // C-x |
+
+        // Extended command
+        self.bind_named(Key::meta('x'), execute_extended_command, "execute-extended-command"); // M-x
 
         // Keyboard macros
         self.bind_named(Key::ctlx('('), start_macro, "kmacro-start-macro");    // C-x (
@@ -432,6 +455,19 @@ pub mod commands {
 
         editor.current_window_mut().set_top_line(new_top);
         editor.force_redraw();
+        Ok(CommandStatus::Success)
+    }
+
+    /// Toggle line numbers display (C-x #)
+    pub fn toggle_line_numbers(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.display.toggle_line_numbers();
+        editor.force_redraw();
+        let status = if editor.display.show_line_numbers {
+            "Line numbers enabled"
+        } else {
+            "Line numbers disabled"
+        };
+        editor.display.set_message(status);
         Ok(CommandStatus::Success)
     }
 
@@ -1517,6 +1553,12 @@ pub mod commands {
     /// Execute shell command
     pub fn shell_command(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
         editor.start_prompt("Shell command", crate::editor::PromptAction::ShellCommand, None);
+        Ok(CommandStatus::Success)
+    }
+
+    /// Execute a command by name (M-x)
+    pub fn execute_extended_command(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.start_prompt("M-x", crate::editor::PromptAction::ExtendedCommand, None);
         Ok(CommandStatus::Success)
     }
 

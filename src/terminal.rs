@@ -154,6 +154,17 @@ impl Terminal {
         Ok(())
     }
 
+    /// Set dim/faint mode (for line numbers, etc.)
+    pub fn set_dim(&mut self, enabled: bool) -> Result<()> {
+        use crossterm::style::{Attribute, SetAttribute};
+        if enabled {
+            queue!(io::stdout(), SetAttribute(Attribute::Dim))?;
+        } else {
+            queue!(io::stdout(), SetAttribute(Attribute::NormalIntensity))?;
+        }
+        Ok(())
+    }
+
     /// Reset all attributes
     pub fn reset_attributes(&mut self) -> Result<()> {
         use crossterm::style::{Attribute, SetAttribute};
