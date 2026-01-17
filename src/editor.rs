@@ -50,6 +50,8 @@ pub struct EditorState {
     pub macro_state: MacroState,
     /// Universal argument (C-u prefix)
     pub prefix_arg: PrefixArg,
+    /// Stored region for filter operation
+    pub filter_region: Option<(usize, usize, usize, usize)>,
 }
 
 /// Universal argument state for C-u prefix
@@ -78,6 +80,8 @@ pub enum PromptAction {
     ReplaceStringReplace, // Non-interactive replace: enter replacement string
     ShellCommand,         // Execute shell command
     FilterBuffer,         // Pipe buffer through shell command
+    FilterRegion,         // Pipe region through shell command (output to buffer)
+    FilterRegionReplace,  // Pipe region through shell command (replace region)
     WriteFile,            // Save buffer to a new filename
 }
 
@@ -219,6 +223,7 @@ impl EditorState {
             query_replace: QueryReplaceState::default(),
             macro_state: MacroState::default(),
             prefix_arg: PrefixArg::default(),
+            filter_region: None,
         }
     }
 
@@ -1430,6 +1435,18 @@ impl EditorState {
                 }
                 self.filter_buffer(&input);
             }
+            PromptAction::FilterRegion => {
+                if input.is_empty() {
+                    return Ok(());
+                }
+                self.filter_region(&input, false);
+            }
+            PromptAction::FilterRegionReplace => {
+                if input.is_empty() {
+                    return Ok(());
+                }
+                self.filter_region(&input, true);
+            }
             PromptAction::WriteFile => {
                 if input.is_empty() {
                     self.display.set_message("No file name");
@@ -2234,6 +2251,186 @@ impl EditorState {
                             "Filter complete: {} lines",
                             new_line_count
                         ));
+                    }
+                    Err(e) => {
+                        self.display.set_message(&format!("Filter error: {}", e));
+                    }
+                }
+            }
+            Err(e) => {
+                self.display.set_message(&format!("Failed to run command: {}", e));
+            }
+        }
+    }
+
+    /// Filter region through shell command (M-|)
+    /// If replace is true, replaces the region with output
+    /// If replace is false, shows output in *Shell Command Output* buffer
+    pub fn filter_region(&mut self, command: &str, replace: bool) {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        // Get the stored region
+        let region = match self.filter_region.take() {
+            Some(r) => r,
+            None => {
+                self.display.set_message("No region stored");
+                return;
+            }
+        };
+
+        let (start_line, start_col, end_line, end_col) = region;
+
+        // Collect region content
+        let mut content = String::new();
+        for line_idx in start_line..=end_line {
+            if let Some(line) = self.current_buffer().line(line_idx) {
+                let text = line.text();
+                let line_start = if line_idx == start_line {
+                    // Convert char index to byte index
+                    text.char_indices()
+                        .nth(start_col)
+                        .map(|(i, _)| i)
+                        .unwrap_or(text.len())
+                } else {
+                    0
+                };
+                let line_end = if line_idx == end_line {
+                    text.char_indices()
+                        .nth(end_col)
+                        .map(|(i, _)| i)
+                        .unwrap_or(text.len())
+                } else {
+                    text.len()
+                };
+
+                if line_start <= line_end && line_end <= text.len() {
+                    content.push_str(&text[line_start..line_end]);
+                }
+                if line_idx < end_line {
+                    content.push('\n');
+                }
+            }
+        }
+
+        // Run command with region as stdin
+        #[cfg(windows)]
+        let result = Command::new("cmd")
+            .args(["/C", command])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+
+        #[cfg(not(windows))]
+        let result = Command::new("sh")
+            .args(["-c", command])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+
+        match result {
+            Ok(mut child) => {
+                // Write content to stdin
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(content.as_bytes());
+                }
+
+                // Wait for output
+                match child.wait_with_output() {
+                    Ok(output) => {
+                        let output_text = String::from_utf8_lossy(&output.stdout);
+
+                        if replace {
+                            // Delete the region (following kill_region pattern)
+                            self.current_buffer_mut().add_undo_boundary();
+
+                            // Move cursor to start of region
+                            self.current_window_mut().set_cursor(start_line, start_col);
+
+                            // Delete the region
+                            if start_line == end_line {
+                                // Same line - simple case
+                                if let Some(line) = self.current_buffer_mut().line_mut(start_line) {
+                                    line.delete_range(start_col, end_col);
+                                }
+                            } else {
+                                // Multi-line deletion
+                                // Delete from start_col to end of start_line
+                                if let Some(line) = self.current_buffer_mut().line_mut(start_line) {
+                                    let line_len = line.len();
+                                    if start_col < line_len {
+                                        line.delete_range(start_col, line_len);
+                                    }
+                                }
+
+                                // Delete intermediate lines (in reverse to avoid index shifting)
+                                for line_idx in (start_line + 1..end_line).rev() {
+                                    self.current_buffer_mut().delete_line(line_idx);
+                                }
+
+                                // Handle the end line - take remaining content after end_col
+                                if end_line > start_line {
+                                    // The end line is now at start_line + 1 (after removing intermediates)
+                                    let remaining_line_idx = start_line + 1;
+                                    if let Some(end_line_content) = self.current_buffer().line(remaining_line_idx) {
+                                        let remaining = if end_col < end_line_content.len() {
+                                            end_line_content.text()[end_col..].to_string()
+                                        } else {
+                                            String::new()
+                                        };
+
+                                        // Append remaining to start line and remove the end line
+                                        if let Some(start_line_ref) = self.current_buffer_mut().line_mut(start_line) {
+                                            start_line_ref.append_str(&remaining);
+                                        }
+                                        self.current_buffer_mut().delete_line(remaining_line_idx);
+                                    }
+                                }
+                            }
+
+                            // Insert the output at the cursor position
+                            for ch in output_text.chars() {
+                                if ch == '\n' {
+                                    let cursor_line = self.current_window().cursor_line();
+                                    let cursor_col = self.current_window().cursor_col();
+                                    self.current_buffer_mut().insert_newline(cursor_line, cursor_col);
+                                    self.current_window_mut().set_cursor(cursor_line + 1, 0);
+                                } else {
+                                    let cursor_line = self.current_window().cursor_line();
+                                    let cursor_col = self.current_window().cursor_col();
+                                    self.current_buffer_mut().insert_char(cursor_line, cursor_col, ch);
+                                    // Advance cursor by 1 char
+                                    let new_col = cursor_col + ch.len_utf8();
+                                    self.current_window_mut().set_cursor(cursor_line, new_col);
+                                }
+                            }
+
+                            self.current_buffer_mut().set_modified(true);
+                            self.display.force_redraw();
+                            self.display.set_message(&format!("Region filtered through '{}'", command));
+                        } else {
+                            // Show output in *Shell Command Output* buffer
+                            let buf_name = "*Shell Command Output*";
+                            if let Some(idx) = self.buffers.iter().position(|b| b.name() == buf_name) {
+                                self.buffers[idx].set_content(&output_text);
+                                if let Some(window) = self.windows.get_mut(self.current_window) {
+                                    window.set_buffer_idx(idx);
+                                    window.set_cursor(0, 0);
+                                }
+                            } else {
+                                let buffer = Buffer::from_content(buf_name, &output_text);
+                                self.buffers.push(buffer);
+                                let idx = self.buffers.len() - 1;
+                                if let Some(window) = self.windows.get_mut(self.current_window) {
+                                    window.set_buffer_idx(idx);
+                                    window.set_cursor(0, 0);
+                                }
+                            }
+                            self.display.force_redraw();
+                            self.display.set_message(&format!("Shell command on region: {}", command));
+                        }
                     }
                     Err(e) => {
                         self.display.set_message(&format!("Filter error: {}", e));

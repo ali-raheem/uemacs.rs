@@ -209,7 +209,8 @@ impl KeyTable {
 
         // Shell
         self.bind_named(Key::meta('!'), shell_command, "shell-command");  // M-!
-        self.bind_named(Key::ctlx('|'), filter_buffer, "shell-command-on-region"); // C-x |
+        self.bind_named(Key::meta('|'), shell_command_on_region, "shell-command-on-region"); // M-|
+        self.bind_named(Key::ctlx('|'), filter_buffer, "filter-buffer"); // C-x |
 
         // Keyboard macros
         self.bind_named(Key::ctlx('('), start_macro, "kmacro-start-macro");    // C-x (
@@ -271,6 +272,13 @@ impl KeyTable {
 
         // Kill operations
         self.bind_named(Key(key_flags::META | key_flags::CONTROL | 'k' as u32), kill_paragraph, "kill-paragraph"); // M-C-k
+        self.bind_named(Key(key_flags::META | key_flags::CONTROL | 'w' as u32), append_next_kill, "append-next-kill"); // M-C-w
+
+        // Line splitting
+        self.bind_named(Key(key_flags::META | key_flags::CONTROL | 'o' as u32), split_line, "split-line"); // M-C-o
+
+        // Indentation
+        self.bind_named(Key::ctlx_ctrl('i'), indent_rigidly, "indent-rigidly"); // C-x TAB (C-x C-i)
     }
 }
 
@@ -1505,6 +1513,33 @@ pub mod commands {
     /// Filter buffer through shell command (C-x |)
     pub fn filter_buffer(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
         editor.start_prompt("Filter through", crate::editor::PromptAction::FilterBuffer, None);
+        Ok(CommandStatus::Success)
+    }
+
+    /// Pipe region through shell command (M-|)
+    /// Without C-u: output goes to *Shell Command Output* buffer
+    /// With C-u: output replaces the region
+    pub fn shell_command_on_region(editor: &mut EditorState, f: bool, _n: i32) -> Result<CommandStatus> {
+        // Get and store the region
+        let region = match get_region(editor) {
+            Some(r) => r,
+            None => {
+                editor.display.set_message("No mark set");
+                return Ok(CommandStatus::Failure);
+            }
+        };
+
+        // Store region for later use after prompt
+        editor.filter_region = Some(region);
+
+        // Choose action based on C-u prefix
+        let action = if f {
+            crate::editor::PromptAction::FilterRegionReplace
+        } else {
+            crate::editor::PromptAction::FilterRegion
+        };
+
+        editor.start_prompt("Shell command on region", action, None);
         Ok(CommandStatus::Success)
     }
 
@@ -2956,6 +2991,95 @@ pub mod commands {
             editor.current_window_mut().set_cursor(start_line, start_col);
             editor.kill_append(&deleted);
         }
+
+        Ok(CommandStatus::Success)
+    }
+
+    /// Split line at point (M-C-o) - like newline but cursor stays in place
+    pub fn split_line(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        editor.display.force_redraw();
+
+        for _ in 0..n.max(1) {
+            let cursor_line = editor.current_window().cursor_line();
+            let cursor_col = editor.current_window().cursor_col();
+
+            // Insert newline at cursor position
+            editor
+                .current_buffer_mut()
+                .insert_newline(cursor_line, cursor_col);
+
+            // Cursor stays at the same position (now at end of current line)
+            // The text after cursor moved to the new line below
+        }
+
+        Ok(CommandStatus::Success)
+    }
+
+    /// Make next kill command append to kill ring (M-C-w)
+    pub fn append_next_kill(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        // Set flag so next kill appends instead of creating new entry
+        editor.last_was_kill = true;
+        editor.display.set_message("Next kill appends");
+        Ok(CommandStatus::Success)
+    }
+
+    /// Indent region rigidly (C-x TAB)
+    pub fn indent_rigidly(editor: &mut EditorState, f: bool, n: i32) -> Result<CommandStatus> {
+        let region = match get_region(editor) {
+            Some(r) => r,
+            None => {
+                editor.display.set_message("No mark set");
+                return Ok(CommandStatus::Failure);
+            }
+        };
+
+        editor.display.force_redraw();
+
+        let (start_line, _, end_line, _) = region;
+        let indent_amount = if f { n } else { 1 }; // Default to 1 space
+
+        for line_idx in start_line..=end_line {
+            if let Some(line) = editor.current_buffer().line(line_idx) {
+                // Skip empty lines
+                if line.text().trim().is_empty() {
+                    continue;
+                }
+            }
+
+            if indent_amount > 0 {
+                // Add spaces at beginning
+                let spaces = " ".repeat(indent_amount as usize);
+                if let Some(line_mut) = editor.current_buffer_mut().line_mut(line_idx) {
+                    let new_text = format!("{}{}", spaces, line_mut.text());
+                    *line_mut = crate::line::Line::from(new_text);
+                }
+            } else if indent_amount < 0 {
+                // Remove spaces from beginning
+                let remove_count = (-indent_amount) as usize;
+                if let Some(line_mut) = editor.current_buffer_mut().line_mut(line_idx) {
+                    let text = line_mut.text();
+                    let mut chars_to_remove = 0;
+                    for ch in text.chars().take(remove_count) {
+                        if ch == ' ' || ch == '\t' {
+                            chars_to_remove += ch.len_utf8();
+                        } else {
+                            break;
+                        }
+                    }
+                    if chars_to_remove > 0 {
+                        line_mut.delete_range(0, chars_to_remove);
+                    }
+                }
+            }
+        }
+
+        editor.current_buffer_mut().set_modified(true);
+        let direction = if indent_amount >= 0 { "right" } else { "left" };
+        editor.display.set_message(&format!(
+            "Indented {} lines {}",
+            end_line - start_line + 1,
+            direction
+        ));
 
         Ok(CommandStatus::Success)
     }

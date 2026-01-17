@@ -43,7 +43,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `C-x i` - Insert file (insert file contents at cursor position)
 
 - **Shell Integration**
-  - `C-x |` - Filter buffer (pipe buffer contents through shell command)
+  - `M-|` - Shell command on region (pipe region through shell command; with C-u, replace region with output)
+  - `C-x |` - Filter buffer (pipe entire buffer contents through shell command)
 
 - **Macro Enhancements**
   - `C-x M-s` - Store macro to slot (save current macro to slot 0-9)
@@ -76,7 +77,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Kill Ring Enhancements**
   - `M-y` - Yank-pop (cycle through kill ring after yank)
   - `M-C-k` - Kill paragraph (kill from point to end of paragraph)
+  - `M-C-w` - Append next kill (make next kill append to kill ring)
   - Consecutive kills now properly append to kill ring
+
+- **Line Operations**
+  - `M-C-o` - Split line (split line at cursor, cursor stays in place)
+
+- **Indentation**
+  - `C-x TAB` - Indent rigidly (indent/outdent region; use C-u for amount)
 
 - **Additional Editing**
   - `M-z` - Zap to char (delete from cursor up to and including specified character)
