@@ -17,7 +17,7 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 | **Navigation** | Cursor (C-f/b/n/p, arrows), words (M-f/b), lines (C-a/e), back-to-indent (M-m), pages (C-v, M-v), buffer (M-<, M->), paragraphs (M-{ M-}), matching fence (M-C-f) |
 | **Editing** | Insert, delete (C-d, Backspace), kill line (C-k), yank (C-y), kill word (M-d), transpose (C-t), quote (C-q), fill paragraph (M-q), just-one-space (M-SPC), delete-horizontal-space (M-\), delete-blank-lines (C-x C-o), tab-to-tab-stop (M-i), trim-line (C-x t), zap-to-char (M-z) |
 | **Case** | Upcase word (M-u), downcase word (M-l), capitalize (M-c), upcase region (C-x C-u), downcase region (C-x C-l) |
-| **Mark/Region** | Set mark (C-space), kill region (C-w), copy region (M-w), exchange point/mark (C-x C-x) |
+| **Mark/Region** | Set mark (C-space), kill region (C-w), copy region (M-w), exchange point/mark (C-x C-x), mark-whole-buffer (C-x h) |
 | **Search** | Incremental search (C-s, C-r), query replace (M-%), replace-string (M-r), hunt forward/backward (M-s, M-S) |
 | **Files** | Open (C-x C-f), save (C-x C-s), write-file (C-x C-w), insert (C-x i), read-only toggle (C-x C-q), quit (C-x C-c) |
 | **Shell** | Shell command (M-!), shell on region (M-\|), filter buffer (C-x \|) |
@@ -26,7 +26,8 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 | **Windows** | Split (C-x 2), delete (C-x 0/1), switch (C-x o), enlarge (C-x ^), shrink (C-x v) |
 | **Undo** | Undo (C-/ or C-_) with operation grouping |
 | **Macros** | Record (C-x (), stop (C-x )), execute (C-x e), store to slot (C-x M-s), load from slot (C-x M-l) |
-| **Prefix** | Universal argument (C-u) for repeat counts |
+| **Prefix** | Universal argument (C-u), digit argument (M-0 to M-9), negative argument (M--) |
+| **Auto-Save** | Periodic auto-save (30s), toggle (C-x a), Emacs-style #file# naming |
 
 ### Potential Future Enhancements
 
@@ -48,7 +49,6 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 - Rectangle operations
 - Customizable key bindings file
 - M-x command execution by name
-- Auto-save
 
 ### Key Bindings Quick Reference
 
@@ -85,9 +85,9 @@ C-x M-l load from slot   C-x i  insert file     M-|    shell on region
 Help/Info:           Navigation:           Other:
 F1     describe bindings M-C-f  match fence    C-u      prefix arg
 M-?    describe key      M-{/}  paragraph      C-g      abort
-M-=    word count                               C-l      refresh
+M-=    word count                               C-l      recenter
 C-x =  cursor position                          C-/ C-_  undo
-C-x t  trim line
+C-x t  trim line                                C-x a    auto-save toggle
 ```
 
 ## Build Commands

@@ -1,6 +1,7 @@
 //! Editor state and main loop
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use crate::buffer::Buffer;
 use crate::command::{CommandStatus, KeyTable};
@@ -52,6 +53,12 @@ pub struct EditorState {
     pub prefix_arg: PrefixArg,
     /// Stored region for filter operation
     pub filter_region: Option<(usize, usize, usize, usize)>,
+    /// Auto-save: last time we auto-saved
+    pub last_auto_save: Instant,
+    /// Auto-save: interval between saves (default 30 seconds)
+    pub auto_save_interval: Duration,
+    /// Auto-save: whether enabled
+    pub auto_save_enabled: bool,
 }
 
 /// Universal argument state for C-u prefix
@@ -224,6 +231,9 @@ impl EditorState {
             macro_state: MacroState::default(),
             prefix_arg: PrefixArg::default(),
             filter_region: None,
+            last_auto_save: Instant::now(),
+            auto_save_interval: Duration::from_secs(30),
+            auto_save_enabled: true,
         }
     }
 
@@ -347,6 +357,8 @@ impl EditorState {
             // Translate key event
             if let Some(key) = self.input.translate_key(key_event) {
                 self.handle_key(key)?;
+                // Check if it's time to auto-save
+                self.check_auto_save();
             } else if self.input.is_pending() {
                 // Show visual feedback that we're waiting for continuation key
                 if self.input.is_ctlx_pending() {
@@ -417,6 +429,40 @@ impl EditorState {
             }
             self.show_prefix_arg();
             return Ok(());
+        }
+
+        // Handle M-digit (digit-argument) - start prefix arg with that digit
+        if key.is_meta() && !key.is_ctrl() && !key.is_ctlx() {
+            if let Some(ch) = key.base_char() {
+                if ch.is_ascii_digit() {
+                    let digit = ch.to_digit(10).unwrap() as i32;
+                    if self.prefix_arg.active {
+                        // Continue building the number
+                        self.prefix_arg.value = Some(
+                            self.prefix_arg.value.unwrap_or(0) * 10 + digit
+                        );
+                    } else {
+                        // Start prefix arg with this digit
+                        self.prefix_arg.active = true;
+                        self.prefix_arg.multiplier = 1;
+                        self.prefix_arg.value = Some(digit);
+                    }
+                    self.show_prefix_arg();
+                    return Ok(());
+                }
+                // M-- (negative-argument)
+                if ch == '-' {
+                    if !self.prefix_arg.active {
+                        self.prefix_arg.active = true;
+                        self.prefix_arg.multiplier = -1;
+                        self.prefix_arg.value = None;
+                    } else if self.prefix_arg.value.is_none() {
+                        self.prefix_arg.multiplier = -self.prefix_arg.multiplier.abs();
+                    }
+                    self.show_prefix_arg();
+                    return Ok(());
+                }
+            }
         }
 
         // Handle digits during prefix arg
@@ -2131,9 +2177,15 @@ impl EditorState {
             Ok(mut file) => {
                 match file.write_all(content.as_bytes()) {
                     Ok(()) => {
+                        // Delete old auto-save file if there was a previous filename
+                        if let Some(old_path) = self.current_buffer().filename() {
+                            self.delete_auto_save_file(old_path);
+                        }
                         // Update buffer's filename and clear modified flag
                         self.current_buffer_mut().set_filename(path.clone());
                         self.current_buffer_mut().set_modified(false);
+                        // Delete auto-save file for new path too
+                        self.delete_auto_save_file(&path);
                         // Update buffer name to match new filename
                         let name = path.file_name()
                             .map(|s| s.to_string_lossy().to_string())
@@ -2440,6 +2492,77 @@ impl EditorState {
             Err(e) => {
                 self.display.set_message(&format!("Failed to run command: {}", e));
             }
+        }
+    }
+
+    /// Generate auto-save filename for a buffer
+    /// Emacs style: /path/to/file.txt -> /path/to/#file.txt#
+    pub fn auto_save_path(path: &PathBuf) -> PathBuf {
+        if let Some(parent) = path.parent() {
+            if let Some(filename) = path.file_name() {
+                let auto_name = format!("#{}", filename.to_string_lossy());
+                return parent.join(format!("{}#", auto_name));
+            }
+        }
+        // Fallback: just add # around the whole path
+        PathBuf::from(format!("#{}#", path.display()))
+    }
+
+    /// Check if it's time to auto-save and do it if needed
+    pub fn check_auto_save(&mut self) {
+        if !self.auto_save_enabled {
+            return;
+        }
+
+        let now = Instant::now();
+        if now.duration_since(self.last_auto_save) < self.auto_save_interval {
+            return;
+        }
+
+        self.last_auto_save = now;
+        self.do_auto_save();
+    }
+
+    /// Perform auto-save on all modified buffers with filenames
+    fn do_auto_save(&mut self) {
+        let mut saved_count = 0;
+
+        for buffer in &self.buffers {
+            // Only auto-save modified buffers that have a filename
+            // Skip special buffers (names starting with *)
+            if !buffer.is_modified() {
+                continue;
+            }
+            if buffer.name().starts_with('*') {
+                continue;
+            }
+            if let Some(path) = buffer.filename() {
+                let auto_path = Self::auto_save_path(path);
+                if buffer.write_to(&auto_path).is_ok() {
+                    saved_count += 1;
+                }
+            }
+        }
+
+        if saved_count > 0 {
+            self.display.set_message(&format!("Auto-saved {} buffer(s)", saved_count));
+        }
+    }
+
+    /// Delete auto-save file for a buffer (called after successful save)
+    pub fn delete_auto_save_file(&self, path: &PathBuf) {
+        let auto_path = Self::auto_save_path(path);
+        let _ = std::fs::remove_file(auto_path);
+    }
+
+    /// Toggle auto-save on/off
+    pub fn toggle_auto_save(&mut self) {
+        self.auto_save_enabled = !self.auto_save_enabled;
+        if self.auto_save_enabled {
+            self.display.set_message("Auto-save enabled");
+            self.last_auto_save = Instant::now();
+        } else {
+            self.display.set_message("Auto-save disabled");
         }
     }
 }

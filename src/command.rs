@@ -154,6 +154,7 @@ impl KeyTable {
         self.bind_named(Key::meta('~'), not_modified, "not-modified"); // M-~
         self.bind_named(Key::ctlx_ctrl('q'), toggle_read_only, "toggle-read-only"); // C-x C-q
         self.bind_named(Key::ctlx_ctrl('r'), revert_buffer, "revert-buffer"); // C-x C-r
+        self.bind_named(Key::ctlx('a'), toggle_auto_save, "auto-save-mode"); // C-x a
 
         // Line operations
         self.bind_named(Key::ctlx_ctrl('k'), copy_line, "copy-line"); // C-x C-k
@@ -268,6 +269,7 @@ impl KeyTable {
 
         // Mark operations
         self.bind_named(Key::meta('h'), mark_paragraph, "mark-paragraph"); // M-h
+        self.bind_named(Key::ctlx('h'), mark_whole_buffer, "mark-whole-buffer"); // C-x h
         self.bind_named(Key::meta('@'), mark_word, "mark-word"); // M-@
 
         // Kill operations
@@ -414,7 +416,21 @@ pub mod commands {
     }
 
     /// Redraw the display
-    pub fn redraw_display(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+    /// Recenter display with cursor line in middle of window (C-l)
+    pub fn redraw_display(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        let cursor_line = editor.current_window().cursor_line();
+        let height = editor.current_window().height() as usize;
+
+        // Calculate new top line to center cursor (or use n as line from top if given)
+        let new_top = if n != 1 {
+            // With argument, put cursor on line n from top (0-indexed internally)
+            cursor_line.saturating_sub((n - 1).max(0) as usize)
+        } else {
+            // Default: center cursor vertically
+            cursor_line.saturating_sub(height / 2)
+        };
+
+        editor.current_window_mut().set_top_line(new_top);
         editor.force_redraw();
         Ok(CommandStatus::Success)
     }
@@ -1657,6 +1673,12 @@ pub mod commands {
         Ok(CommandStatus::Success)
     }
 
+    /// Toggle auto-save mode (C-x a)
+    pub fn toggle_auto_save(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.toggle_auto_save();
+        Ok(CommandStatus::Success)
+    }
+
     /// Revert buffer to saved file contents (M-x revert-buffer)
     pub fn revert_buffer(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
         use std::fs;
@@ -1818,6 +1840,10 @@ pub mod commands {
         match editor.current_buffer().save() {
             Ok(()) => {
                 editor.current_buffer_mut().set_modified(false);
+                // Delete auto-save file after successful save
+                if let Some(path) = editor.current_buffer().filename() {
+                    editor.delete_auto_save_file(path);
+                }
                 editor
                     .display
                     .set_message(&format!("Wrote {} lines to {}", line_count, filename));
@@ -2912,6 +2938,29 @@ pub mod commands {
         forward_word(editor, false, n)?;
 
         editor.display.set_message("Mark set");
+        Ok(CommandStatus::Success)
+    }
+
+    /// Mark whole buffer (C-x h) - select entire buffer
+    pub fn mark_whole_buffer(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        // Move to end of buffer
+        let line_count = editor.current_buffer().line_count();
+        if line_count > 0 {
+            let last_line = line_count - 1;
+            let last_col = editor.current_buffer().line(last_line)
+                .map(|l| l.len())
+                .unwrap_or(0);
+            editor.current_window_mut().set_cursor(last_line, last_col);
+        }
+
+        // Set mark at end
+        editor.current_window_mut().set_mark();
+
+        // Move to beginning of buffer
+        editor.current_window_mut().set_cursor(0, 0);
+        editor.current_window_mut().set_top_line(0);
+
+        editor.display.set_message("Mark set (whole buffer)");
         Ok(CommandStatus::Success)
     }
 

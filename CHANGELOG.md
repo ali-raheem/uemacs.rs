@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `C-u C-u` - Multiply by 4 (16)
   - `C-u 5` - Explicit numeric argument
   - `C-u 1 2` - Multi-digit argument (12)
+  - `M-0` to `M-9` - Digit argument (quick numeric prefix)
+  - `M--` - Negative argument (make next command use negative count)
   - Works with all commands (e.g., `C-u 10 C-f` moves 10 characters)
   - Works with self-insert (e.g., `C-u 5 a` inserts "aaaaa")
 
@@ -24,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Mark/Cursor Operations**
   - `C-x C-x` - Exchange point and mark (swap cursor and mark positions)
+  - `C-x h` - Mark whole buffer (select entire buffer)
 
 - **Utility Commands**
   - `C-x =` - Show cursor position info (line, column, character code)
@@ -38,6 +41,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Navigation Enhancements**
   - `M-C-f` - Goto matching fence (jump to matching bracket, paren, or brace)
+
+- **Display**
+  - `C-l` - Recenter (center cursor line on screen; with C-u n, put cursor on line n from top)
 
 - **File Operations**
   - `C-x i` - Insert file (insert file contents at cursor position)
@@ -55,6 +61,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `C-x C-w` - Write file (Save As - save buffer to a new filename)
   - `M-~` - Not modified (clear the modification flag)
   - `C-x C-q` - Toggle read-only mode
+
+- **Auto-Save**
+  - Automatic periodic saving of modified buffers (every 30 seconds)
+  - Saves to `#filename#` in same directory (Emacs-style)
+  - `C-x a` - Toggle auto-save on/off
+  - Auto-save files automatically deleted on proper save
 
 - **Additional Navigation**
   - `M-m` - Back to indentation (move to first non-whitespace on line)
