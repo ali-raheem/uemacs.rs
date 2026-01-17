@@ -160,6 +160,8 @@ pub struct InputState {
     ctlx_pending: bool,
     /// Waiting for Meta continuation (after ESC)
     meta_pending: bool,
+    /// Waiting for C-x Meta continuation (C-x ESC sequence)
+    ctlx_meta_pending: bool,
 }
 
 impl InputState {
@@ -167,6 +169,7 @@ impl InputState {
         Self {
             ctlx_pending: false,
             meta_pending: false,
+            ctlx_meta_pending: false,
         }
     }
 
@@ -174,11 +177,12 @@ impl InputState {
     pub fn reset(&mut self) {
         self.ctlx_pending = false;
         self.meta_pending = false;
+        self.ctlx_meta_pending = false;
     }
 
     /// Check if waiting for continuation key
     pub fn is_pending(&self) -> bool {
-        self.ctlx_pending || self.meta_pending
+        self.ctlx_pending || self.meta_pending || self.ctlx_meta_pending
     }
 
     /// Check if waiting for C-x continuation
@@ -204,6 +208,12 @@ impl InputState {
         }
 
         // Handle based on current state
+        if self.ctlx_meta_pending {
+            self.ctlx_meta_pending = false;
+            // C-x ESC <key> -> C-x M-<key>
+            return self.translate_with_ctlx_meta(code, modifiers);
+        }
+
         if self.meta_pending {
             self.meta_pending = false;
             return self.translate_with_meta(code, modifiers);
@@ -211,6 +221,11 @@ impl InputState {
 
         if self.ctlx_pending {
             self.ctlx_pending = false;
+            // Check if ESC is pressed after C-x - start C-x M- sequence
+            if code == KeyCode::Esc {
+                self.ctlx_meta_pending = true;
+                return None; // Wait for next key
+            }
             return self.translate_with_ctlx(code, modifiers);
         }
 
@@ -284,16 +299,36 @@ impl InputState {
 
     fn translate_with_ctlx(&self, code: KeyCode, modifiers: KeyModifiers) -> Option<Key> {
         let ctrl = modifiers.contains(KeyModifiers::CONTROL);
+        let alt = modifiers.contains(KeyModifiers::ALT);
 
         match code {
             KeyCode::Char(ch) => {
+                let mut key_code = key_flags::CTLX | ch.to_ascii_lowercase() as u32;
                 if ctrl {
-                    Some(Key::ctlx_ctrl(ch))
-                } else {
-                    Some(Key::ctlx(ch))
+                    key_code |= key_flags::CONTROL;
                 }
+                if alt {
+                    key_code |= key_flags::META;
+                }
+                Some(Key(key_code))
             }
             _ => self.translate_normal(code, modifiers).map(|k| Key(k.0 | key_flags::CTLX)),
+        }
+    }
+
+    fn translate_with_ctlx_meta(&self, code: KeyCode, modifiers: KeyModifiers) -> Option<Key> {
+        // C-x ESC <key> -> CTLX | META | key
+        let ctrl = modifiers.contains(KeyModifiers::CONTROL);
+
+        match code {
+            KeyCode::Char(ch) => {
+                let mut key_code = key_flags::CTLX | key_flags::META | ch.to_ascii_lowercase() as u32;
+                if ctrl {
+                    key_code |= key_flags::CONTROL;
+                }
+                Some(Key(key_code))
+            }
+            _ => self.translate_normal(code, modifiers).map(|k| Key(k.0 | key_flags::CTLX | key_flags::META)),
         }
     }
 }

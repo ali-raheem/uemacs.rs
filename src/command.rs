@@ -152,6 +152,11 @@ impl KeyTable {
         self.bind_named(Key::ctlx('i'), insert_file, "insert-file"); // C-x i
         self.bind_named(Key::meta('~'), not_modified, "not-modified"); // M-~
         self.bind_named(Key::ctlx_ctrl('q'), toggle_read_only, "toggle-read-only"); // C-x C-q
+        self.bind_named(Key::ctlx_ctrl('r'), revert_buffer, "revert-buffer"); // C-x C-r
+
+        // Line operations
+        self.bind_named(Key::ctlx_ctrl('k'), copy_line, "copy-line"); // C-x C-k
+        self.bind_named(Key::ctlx('d'), duplicate_line, "duplicate-line"); // C-x d
 
         // Word operations
         self.bind_named(Key::meta('f'), forward_word, "forward-word");
@@ -1492,6 +1497,130 @@ pub mod commands {
         } else {
             editor.display.set_message("Buffer is now writable");
         }
+        Ok(CommandStatus::Success)
+    }
+
+    /// Revert buffer to saved file contents (M-x revert-buffer)
+    pub fn revert_buffer(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        use std::fs;
+
+        let filename = match editor.current_buffer().filename() {
+            Some(path) => path.clone(),
+            None => {
+                editor.display.set_message("Buffer has no file");
+                return Ok(CommandStatus::Failure);
+            }
+        };
+
+        match fs::read_to_string(&filename) {
+            Ok(content) => {
+                editor.current_buffer_mut().set_content(&content);
+                editor.current_buffer_mut().set_modified(false);
+                editor.current_window_mut().set_cursor(0, 0);
+                editor.current_window_mut().set_top_line(0);
+                editor.display.force_redraw();
+                editor.display.set_message(&format!("Reverted {}", filename.display()));
+                Ok(CommandStatus::Success)
+            }
+            Err(e) => {
+                editor.display.set_message(&format!("Error reading file: {}", e));
+                Ok(CommandStatus::Failure)
+            }
+        }
+    }
+
+    /// Copy current line to kill ring (C-x C-k)
+    pub fn copy_line(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        let cursor_line = editor.current_window().cursor_line();
+        let count = n.max(1) as usize;
+        let line_count = editor.current_buffer().line_count();
+
+        let mut copied = String::new();
+        for i in 0..count {
+            let line_idx = cursor_line + i;
+            if line_idx >= line_count {
+                break;
+            }
+            if let Some(line) = editor.current_buffer().line(line_idx) {
+                copied.push_str(line.text());
+                copied.push('\n');
+            }
+        }
+
+        if !copied.is_empty() {
+            editor.start_kill();
+            editor.kill_append(&copied);
+            let actual_count = count.min(line_count - cursor_line);
+            editor.display.set_message(&format!("Copied {} line(s)", actual_count));
+        }
+
+        Ok(CommandStatus::Success)
+    }
+
+    /// Duplicate current line (C-x d)
+    pub fn duplicate_line(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        let cursor_line = editor.current_window().cursor_line();
+        let cursor_col = editor.current_window().cursor_col();
+        let count = n.max(1) as usize;
+
+        // Get the current line text
+        let line_text = match editor.current_buffer().line(cursor_line) {
+            Some(line) => line.text().to_string(),
+            None => return Ok(CommandStatus::Failure),
+        };
+
+        // Insert duplicates after current line
+        for i in 0..count {
+            let insert_at = cursor_line + 1 + i;
+            editor.current_buffer_mut().insert_line_at(insert_at);
+            if let Some(line) = editor.current_buffer_mut().line_mut(insert_at) {
+                line.append_str(&line_text);
+            }
+        }
+
+        editor.current_buffer_mut().set_modified(true);
+        // Move cursor to first duplicate
+        editor.current_window_mut().set_cursor(cursor_line + 1, cursor_col);
+        editor.display.set_message(&format!("Duplicated {} time(s)", count));
+
+        Ok(CommandStatus::Success)
+    }
+
+    /// Sort lines in region
+    pub fn sort_lines(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        let region = get_region(editor);
+
+        let (start_line, end_line) = match region {
+            Some((sl, _, el, _)) => (sl, el),
+            None => {
+                editor.display.set_message("No region set");
+                return Ok(CommandStatus::Failure);
+            }
+        };
+
+        // Collect lines
+        let mut lines: Vec<String> = Vec::new();
+        for i in start_line..=end_line {
+            if let Some(line) = editor.current_buffer().line(i) {
+                lines.push(line.text().to_string());
+            }
+        }
+
+        // Sort
+        lines.sort();
+
+        // Replace lines
+        for (i, new_text) in lines.iter().enumerate() {
+            let line_idx = start_line + i;
+            if let Some(line) = editor.current_buffer_mut().line_mut(line_idx) {
+                line.clear();
+                line.append_str(new_text);
+            }
+        }
+
+        editor.current_buffer_mut().set_modified(true);
+        editor.display.set_message(&format!("Sorted {} lines", end_line - start_line + 1));
+
         Ok(CommandStatus::Success)
     }
 

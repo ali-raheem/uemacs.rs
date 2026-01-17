@@ -60,6 +60,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Additional Editing**
   - `M-z` - Zap to char (delete from cursor up to and including specified character)
+  - `C-x d` - Duplicate line (duplicate current line below)
+  - `C-x C-k` - Copy line (copy current line to kill ring)
+
+- **Additional File/Buffer Operations**
+  - `C-x C-r` - Revert buffer (reload file from disk)
+
+- **Display Name**
+  - App now displays as "uEmacs.rs" to differentiate from C version
 
 - **Search Enhancements**
   - `M-r` - Replace string (non-interactive search and replace all)
