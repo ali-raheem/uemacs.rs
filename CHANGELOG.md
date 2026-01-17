@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Region Highlighting**
+  - Selected text between mark and cursor is now visually highlighted
+  - Uses reverse video styling for clear visibility
+  - Foundation infrastructure for future syntax highlighting
 - **Universal Argument (C-u)**
   - `C-u` - Prefix argument (default 4)
   - `C-u C-u` - Multiply by 4 (16)

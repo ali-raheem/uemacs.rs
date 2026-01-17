@@ -172,6 +172,76 @@ impl Terminal {
         Ok(())
     }
 
+    /// Set foreground color
+    pub fn set_foreground(&mut self, color: crate::syntax::Color) -> Result<()> {
+        use crossterm::style::{Color as XColor, SetForegroundColor};
+        let xcolor = Self::convert_color(color);
+        queue!(io::stdout(), SetForegroundColor(xcolor))?;
+        Ok(())
+    }
+
+    /// Set background color
+    pub fn set_background(&mut self, color: crate::syntax::Color) -> Result<()> {
+        use crossterm::style::{Color as XColor, SetBackgroundColor};
+        let xcolor = Self::convert_color(color);
+        queue!(io::stdout(), SetBackgroundColor(xcolor))?;
+        Ok(())
+    }
+
+    /// Set bold attribute
+    pub fn set_bold(&mut self, enabled: bool) -> Result<()> {
+        use crossterm::style::{Attribute, SetAttribute};
+        if enabled {
+            queue!(io::stdout(), SetAttribute(Attribute::Bold))?;
+        } else {
+            queue!(io::stdout(), SetAttribute(Attribute::NormalIntensity))?;
+        }
+        Ok(())
+    }
+
+    /// Apply a complete style
+    pub fn apply_style(&mut self, style: &crate::syntax::Style) -> Result<()> {
+        // Reset first to clear any previous styling
+        if style.reverse {
+            self.set_reverse(true)?;
+        }
+        if style.fg != crate::syntax::Color::Default {
+            self.set_foreground(style.fg)?;
+        }
+        if style.bg != crate::syntax::Color::Default {
+            self.set_background(style.bg)?;
+        }
+        if style.bold {
+            self.set_bold(true)?;
+        }
+        Ok(())
+    }
+
+    /// Convert our Color enum to crossterm's Color
+    fn convert_color(color: crate::syntax::Color) -> crossterm::style::Color {
+        use crate::syntax::Color;
+        use crossterm::style::Color as XColor;
+        match color {
+            Color::Default => XColor::Reset,
+            Color::Black => XColor::Black,
+            Color::Red => XColor::DarkRed,
+            Color::Green => XColor::DarkGreen,
+            Color::Yellow => XColor::DarkYellow,
+            Color::Blue => XColor::DarkBlue,
+            Color::Magenta => XColor::DarkMagenta,
+            Color::Cyan => XColor::DarkCyan,
+            Color::White => XColor::Grey,
+            Color::BrightBlack => XColor::DarkGrey,
+            Color::BrightRed => XColor::Red,
+            Color::BrightGreen => XColor::Green,
+            Color::BrightYellow => XColor::Yellow,
+            Color::BrightBlue => XColor::Blue,
+            Color::BrightMagenta => XColor::Magenta,
+            Color::BrightCyan => XColor::Cyan,
+            Color::BrightWhite => XColor::White,
+        }
+    }
+
     /// Sound the bell
     pub fn beep(&mut self) -> Result<()> {
         print!("\x07");

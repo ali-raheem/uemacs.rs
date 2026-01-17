@@ -10,6 +10,7 @@ mod editor;
 mod error;
 mod input;
 mod line;
+mod syntax;
 mod terminal;
 mod window;
 

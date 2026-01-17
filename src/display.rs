@@ -2,8 +2,74 @@
 
 use crate::buffer::Buffer;
 use crate::error::Result;
+use crate::syntax::Style;
 use crate::terminal::Terminal;
 use crate::window::Window;
+
+/// Region bounds (normalized so start <= end)
+#[derive(Debug, Clone, Copy)]
+struct Region {
+    start_line: usize,
+    start_col: usize,
+    end_line: usize,
+    end_col: usize,
+}
+
+impl Region {
+    /// Create a region from mark and cursor positions, normalizing so start <= end
+    fn from_mark_and_cursor(
+        mark_line: usize,
+        mark_col: usize,
+        cursor_line: usize,
+        cursor_col: usize,
+    ) -> Self {
+        if mark_line < cursor_line || (mark_line == cursor_line && mark_col <= cursor_col) {
+            Self {
+                start_line: mark_line,
+                start_col: mark_col,
+                end_line: cursor_line,
+                end_col: cursor_col,
+            }
+        } else {
+            Self {
+                start_line: cursor_line,
+                start_col: cursor_col,
+                end_line: mark_line,
+                end_col: mark_col,
+            }
+        }
+    }
+
+    /// Get the portion of a line that's in the region (as byte offsets)
+    /// Returns None if line is not in region, Some((start, end)) otherwise
+    fn line_intersection(&self, line_idx: usize, line_len: usize) -> Option<(usize, usize)> {
+        if line_idx < self.start_line || line_idx > self.end_line {
+            return None;
+        }
+
+        let start = if line_idx == self.start_line {
+            self.start_col
+        } else {
+            0
+        };
+
+        let end = if line_idx == self.end_line {
+            self.end_col
+        } else {
+            line_len
+        };
+
+        if start < end || (start == end && line_idx < self.end_line) {
+            // Include the newline for intermediate lines
+            Some((start, end.max(start)))
+        } else if start == end && start == 0 && line_idx == self.end_line {
+            // Cursor at beginning of end line, don't highlight
+            None
+        } else {
+            Some((start, end.max(start)))
+        }
+    }
+}
 
 /// Display state
 pub struct Display {
@@ -113,6 +179,20 @@ impl Display {
         let lnum_width = self.line_number_width(buffer.line_count());
         let text_cols = cols.saturating_sub(lnum_width);
 
+        // Get region if mark is set (only for current window)
+        let region = if is_current {
+            window.mark().map(|(mark_line, mark_col)| {
+                Region::from_mark_and_cursor(
+                    mark_line,
+                    mark_col,
+                    window.cursor_line(),
+                    window.cursor_col(),
+                )
+            })
+        } else {
+            None
+        };
+
         // Render each line in the window
         for row_offset in 0..height {
             let screen_row = top_row + row_offset as u16;
@@ -129,10 +209,9 @@ impl Display {
                     terminal.set_dim(false)?;
                 }
 
-                // Render line content, truncated to remaining screen width
+                // Render line content with possible region highlighting
                 let text = line.text();
-                let display_text = truncate_to_width(text, text_cols);
-                terminal.write_str(&display_text)?;
+                self.render_line_with_region(terminal, text, line_idx, text_cols, &region)?;
             } else {
                 // Empty line indicator (like vim's ~)
                 if self.show_line_numbers {
@@ -149,6 +228,88 @@ impl Display {
         // Render mode line
         let mode_line_row = top_row + height as u16;
         self.render_mode_line(terminal, buffer, window, mode_line_row, cols, is_current)?;
+
+        Ok(())
+    }
+
+    /// Render a line with optional region highlighting
+    fn render_line_with_region(
+        &self,
+        terminal: &mut Terminal,
+        text: &str,
+        line_idx: usize,
+        max_cols: usize,
+        region: &Option<Region>,
+    ) -> Result<()> {
+        // Check if this line intersects with the region
+        let intersection = region.as_ref().and_then(|r| r.line_intersection(line_idx, text.len()));
+
+        match intersection {
+            None => {
+                // No region on this line, render normally
+                let display_text = truncate_to_width(text, max_cols);
+                terminal.write_str(&display_text)?;
+            }
+            Some((start_byte, end_byte)) => {
+                // Line has region, render in three parts: before, selected, after
+                let selection_style = Style::reverse();
+
+                // Calculate display widths and positions
+                let mut col = 0;
+                let mut char_iter = text.char_indices().peekable();
+                let mut before_end_col = 0;
+                let mut selection_end_col = 0;
+
+                // Find display column positions for byte offsets
+                while let Some(&(byte_pos, ch)) = char_iter.peek() {
+                    let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+
+                    if byte_pos < start_byte {
+                        before_end_col = col + ch_width;
+                    }
+                    if byte_pos < end_byte {
+                        selection_end_col = col + ch_width;
+                    }
+
+                    col += ch_width;
+                    char_iter.next();
+                }
+
+                // Handle end-of-string case
+                if end_byte >= text.len() {
+                    selection_end_col = col;
+                }
+
+                // Part 1: Before selection
+                if start_byte > 0 {
+                    let before = safe_slice_to(text, start_byte);
+                    let display_before = truncate_to_width(before, max_cols);
+                    terminal.write_str(&display_before)?;
+                }
+
+                // Part 2: Selected region (reverse video)
+                if start_byte < text.len() && start_byte < end_byte {
+                    let selected = safe_slice(text, start_byte, end_byte);
+                    let remaining_cols = max_cols.saturating_sub(before_end_col);
+                    if remaining_cols > 0 {
+                        let display_selected = truncate_to_width(selected, remaining_cols);
+                        terminal.apply_style(&selection_style)?;
+                        terminal.write_str(&display_selected)?;
+                        terminal.reset_attributes()?;
+                    }
+                }
+
+                // Part 3: After selection
+                if end_byte < text.len() {
+                    let after = safe_slice_from(text, end_byte);
+                    let remaining_cols = max_cols.saturating_sub(selection_end_col);
+                    if remaining_cols > 0 {
+                        let display_after = truncate_to_width(after, remaining_cols);
+                        terminal.write_str(&display_after)?;
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
@@ -291,4 +452,56 @@ fn truncate_to_width(s: &str, max_width: usize) -> String {
     }
 
     result
+}
+
+/// UTF-8 safe slice from start to end byte offset
+fn safe_slice(s: &str, start: usize, end: usize) -> &str {
+    let start = find_safe_boundary(s, start, true);
+    let end = find_safe_boundary(s, end, false);
+    &s[start..end]
+}
+
+/// UTF-8 safe slice from start to end of string
+fn safe_slice_from(s: &str, start: usize) -> &str {
+    let start = find_safe_boundary(s, start, true);
+    &s[start..]
+}
+
+/// UTF-8 safe slice from beginning to end byte offset
+fn safe_slice_to(s: &str, end: usize) -> &str {
+    let end = find_safe_boundary(s, end, false);
+    &s[..end]
+}
+
+/// Find a safe UTF-8 boundary near the given byte offset
+/// If forward is true, search forward; otherwise search backward
+fn find_safe_boundary(s: &str, offset: usize, forward: bool) -> usize {
+    if offset >= s.len() {
+        return s.len();
+    }
+    if offset == 0 {
+        return 0;
+    }
+
+    if s.is_char_boundary(offset) {
+        return offset;
+    }
+
+    if forward {
+        // Search forward for next boundary
+        for i in offset..=s.len() {
+            if s.is_char_boundary(i) {
+                return i;
+            }
+        }
+        s.len()
+    } else {
+        // Search backward for previous boundary
+        for i in (0..offset).rev() {
+            if s.is_char_boundary(i) {
+                return i;
+            }
+        }
+        0
+    }
 }
