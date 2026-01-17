@@ -51,7 +51,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Configuration**
   - Configuration file support (`~/.uemacs.conf` or `%USERPROFILE%\.uemacs.conf` on Windows)
-  - Supported settings: `line-numbers`, `auto-save`, `auto-save-interval`, `tab-width`
+  - Supported settings: `line-numbers`, `auto-save`, `auto-save-interval`, `tab-width`, `warn-unsaved`
+
+- **Unsaved Buffer Warning**
+  - Warning prompt when quitting with unsaved buffers (answer y/n)
+  - Warning prompt when killing a modified buffer
+  - `C-x w` - Toggle unsaved buffer warnings on/off
+  - `C-u C-x C-c` - Force quit without warning (bypass check)
+  - Configurable via `warn-unsaved = true/false` in config file
 
 - **File Operations**
   - `C-x i` - Insert file (insert file contents at cursor position)

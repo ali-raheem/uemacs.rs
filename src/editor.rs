@@ -59,6 +59,10 @@ pub struct EditorState {
     pub auto_save_interval: Duration,
     /// Auto-save: whether enabled
     pub auto_save_enabled: bool,
+    /// Whether to warn before closing unsaved buffers
+    pub warn_unsaved: bool,
+    /// Pending quit (waiting for confirmation after unsaved warning)
+    pub pending_quit: bool,
 }
 
 /// Universal argument state for C-u prefix
@@ -91,6 +95,8 @@ pub enum PromptAction {
     FilterRegionReplace,  // Pipe region through shell command (replace region)
     WriteFile,            // Save buffer to a new filename
     ExtendedCommand,      // M-x: execute command by name
+    ConfirmQuit,          // Confirm quit with unsaved buffers
+    ConfirmKillBuffer,    // Confirm kill buffer with unsaved changes
 }
 
 /// Minibuffer prompt state
@@ -235,6 +241,8 @@ impl EditorState {
             last_auto_save: Instant::now(),
             auto_save_interval: Duration::from_secs(30),
             auto_save_enabled: true,
+            warn_unsaved: true,
+            pending_quit: false,
         }
     }
 
@@ -246,6 +254,9 @@ impl EditorState {
         // Auto-save settings
         self.auto_save_enabled = config.auto_save;
         self.auto_save_interval = std::time::Duration::from_secs(config.auto_save_interval);
+
+        // Warning settings
+        self.warn_unsaved = config.warn_unsaved;
 
         // Tab width is stored in Line, but we don't have a global tab width setting yet
         // This could be added in the future
@@ -907,6 +918,60 @@ impl EditorState {
         self.running = false;
     }
 
+    /// Check if any buffers have unsaved modifications
+    pub fn has_modified_buffers(&self) -> bool {
+        self.buffers.iter().any(|b| b.is_modified())
+    }
+
+    /// Get names of all modified buffers
+    pub fn modified_buffer_names(&self) -> Vec<&str> {
+        self.buffers
+            .iter()
+            .filter(|b| b.is_modified())
+            .map(|b| b.name())
+            .collect()
+    }
+
+    /// Toggle the warn-unsaved setting
+    pub fn toggle_warn_unsaved(&mut self) {
+        self.warn_unsaved = !self.warn_unsaved;
+        let status = if self.warn_unsaved {
+            "Unsaved buffer warnings enabled"
+        } else {
+            "Unsaved buffer warnings disabled"
+        };
+        self.display.set_message(status);
+    }
+
+    /// Force quit without checking for unsaved buffers
+    pub fn force_quit(&mut self) {
+        self.pending_quit = false;
+        self.running = false;
+    }
+
+    /// Force kill a buffer without checking for modifications
+    pub fn force_kill_buffer(&mut self, name: &str) {
+        if let Some(idx) = self.buffers.iter().position(|b| b.name() == name) {
+            if self.buffers.len() <= 1 {
+                self.display.set_message("Can't kill the only buffer");
+                return;
+            }
+            self.buffers.remove(idx);
+            // Update window buffer indices
+            for window in &mut self.windows {
+                let win_buf = window.buffer_idx();
+                if win_buf == idx {
+                    window.set_buffer_idx(0);
+                    window.set_cursor(0, 0);
+                } else if win_buf > idx {
+                    window.set_buffer_idx(win_buf - 1);
+                }
+            }
+            self.display.force_redraw();
+            self.display.set_message(&format!("Killed buffer {}", name));
+        }
+    }
+
     /// Start a new kill sequence or continue appending
     pub fn start_kill(&mut self) {
         if !self.last_was_kill {
@@ -1401,24 +1466,19 @@ impl EditorState {
                         self.display.set_message("Can't kill the only buffer");
                         return Ok(());
                     }
-                    // Check if modified
-                    if self.buffers[idx].is_modified() {
-                        self.display.set_message(&format!("Buffer {} modified; kill anyway? (not implemented)", input));
+                    // Check if modified and warning is enabled
+                    if self.warn_unsaved && self.buffers[idx].is_modified() {
+                        // Prompt for confirmation
+                        self.prompt.active = true;
+                        self.prompt.prompt = format!("Buffer {} modified; kill anyway? (y/n) ", input);
+                        self.prompt.input.clear();
+                        self.prompt.action = PromptAction::ConfirmKillBuffer;
+                        self.prompt.default = Some(input);
+                        self.update_prompt_display();
                         return Ok(());
                     }
-                    self.buffers.remove(idx);
-                    // Update window buffer indices
-                    for window in &mut self.windows {
-                        let win_buf = window.buffer_idx();
-                        if win_buf == idx {
-                            window.set_buffer_idx(0);
-                            window.set_cursor(0, 0);
-                        } else if win_buf > idx {
-                            window.set_buffer_idx(win_buf - 1);
-                        }
-                    }
-                    self.display.force_redraw();
-                    self.display.set_message(&format!("Killed buffer {}", input));
+                    // Kill the buffer
+                    self.force_kill_buffer(&input);
                 } else {
                     self.display.set_message(&format!("No buffer named {}", input));
                 }
@@ -1519,6 +1579,26 @@ impl EditorState {
                     return Ok(());
                 }
                 self.execute_named_command(&input);
+            }
+            PromptAction::ConfirmQuit => {
+                let input_lower = input.to_lowercase();
+                if input_lower == "y" || input_lower == "yes" {
+                    self.force_quit();
+                } else {
+                    self.display.set_message("Quit cancelled");
+                }
+            }
+            PromptAction::ConfirmKillBuffer => {
+                let input_lower = input.to_lowercase();
+                if input_lower == "y" || input_lower == "yes" {
+                    // Get the buffer name from the stored prompt default
+                    if let Some(ref buf_name) = self.prompt.default {
+                        let buf_name = buf_name.clone();
+                        self.force_kill_buffer(&buf_name);
+                    }
+                } else {
+                    self.display.set_message("Buffer not killed");
+                }
             }
             PromptAction::None => {}
         }

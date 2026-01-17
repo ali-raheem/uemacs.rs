@@ -31,6 +31,7 @@ A complete rewrite of uEmacs/PK 4.0 in Rust for modern platforms. This is a stan
 | **Display** | Line numbers toggle (C-x #) |
 | **Extended** | M-x execute command by name with partial match suggestions |
 | **Config** | Config file (~/.uemacs.conf) for persistent settings |
+| **Safety** | Unsaved buffer warning on quit/kill (toggleable with C-x w), force quit with C-u C-x C-c |
 
 ### Potential Future Enhancements
 
@@ -92,6 +93,7 @@ M-=    word count                               C-l      recenter
 C-x =  cursor position                          C-/ C-_  undo
 C-x t  trim line                                C-x a    auto-save toggle
 M-x    execute command                          C-x #    toggle line numbers
+                                                 C-x w    toggle unsaved warning
 ```
 
 ## Build Commands

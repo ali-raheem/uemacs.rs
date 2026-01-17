@@ -29,6 +29,8 @@ pub struct Config {
     pub auto_save_interval: u64,
     /// Tab width for display
     pub tab_width: usize,
+    /// Whether to warn before closing unsaved buffers
+    pub warn_unsaved: bool,
 }
 
 impl Default for Config {
@@ -38,6 +40,7 @@ impl Default for Config {
             auto_save: true,
             auto_save_interval: 30,
             tab_width: 8,
+            warn_unsaved: true,
         }
     }
 }
@@ -118,6 +121,10 @@ impl Config {
                 self.tab_width = n.clamp(1, 16); // Between 1 and 16
             }
         }
+
+        if let Some(value) = settings.get("warn-unsaved") {
+            self.warn_unsaved = parse_bool(value);
+        }
     }
 
     /// Save current configuration to file
@@ -129,11 +136,13 @@ impl Config {
                  line-numbers = {}\n\
                  auto-save = {}\n\
                  auto-save-interval = {}\n\
-                 tab-width = {}\n",
+                 tab-width = {}\n\
+                 warn-unsaved = {}\n",
                 self.show_line_numbers,
                 self.auto_save,
                 self.auto_save_interval,
-                self.tab_width
+                self.tab_width,
+                self.warn_unsaved
             );
             fs::write(path, contents)?;
         }

@@ -4,7 +4,7 @@ use crate::editor::EditorState;
 use crate::error::Result;
 use crate::line::Line;
 use super::CommandStatus;
-use super::navigation::{forward_word, backward_word, is_word_char};
+use super::navigation::{forward_word, backward_word};
 
 /// Delete character at cursor (forward)
 pub fn delete_char_forward(editor: &mut EditorState, f: bool, n: i32) -> Result<CommandStatus> {
@@ -626,7 +626,7 @@ pub fn backward_kill_word(editor: &mut EditorState, _f: bool, n: i32) -> Result<
 
 /// Fill (reflow) the current paragraph
 pub fn fill_paragraph(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
-    editor.fill_paragraph();
+    editor.fill_paragraph(72); // Default fill column
     Ok(CommandStatus::Success)
 }
 

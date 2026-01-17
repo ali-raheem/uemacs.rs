@@ -194,6 +194,7 @@ impl KeyTable {
         self.bind_named(Key::ctlx_ctrl('q'), toggle_read_only, "toggle-read-only");
         self.bind_named(Key::ctlx_ctrl('r'), revert_buffer, "revert-buffer");
         self.bind_named(Key::ctlx('a'), toggle_auto_save, "auto-save-mode");
+        self.bind_named(Key::ctlx('w'), toggle_warn_unsaved, "toggle-warn-unsaved");
 
         // Line operations
         self.bind_named(Key::ctlx_ctrl('k'), copy_line, "copy-line");
