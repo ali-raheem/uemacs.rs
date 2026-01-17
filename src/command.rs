@@ -78,9 +78,21 @@ impl KeyTable {
         self.bindings.get(&key.code()).map(|e| e.name)
     }
 
+    /// Get all bindings as (key_code, command_name) pairs
+    pub fn all_bindings(&self) -> Vec<(u32, &'static str)> {
+        let mut bindings: Vec<_> = self.bindings
+            .iter()
+            .map(|(&code, entry)| (code, entry.name))
+            .collect();
+        // Sort by command name for easier reading
+        bindings.sort_by(|a, b| a.1.cmp(b.1));
+        bindings
+    }
+
     /// Set up default key bindings
     fn setup_defaults(&mut self) {
         use commands::*;
+        use crate::input::key_flags;
 
         // Basic cursor movement
         self.bind_named(Key::ctrl('f'), forward_char, "forward-char");
@@ -214,6 +226,16 @@ impl KeyTable {
 
         // Help (M-? since C-h is backspace in uEmacs)
         self.bind_named(Key::meta('?'), describe_key, "describe-key"); // M-?
+        self.bind_named(Key::special(0x3b), describe_bindings, "describe-bindings"); // F1
+
+        // Statistics
+        self.bind_named(Key::meta('='), word_count, "count-words"); // M-=
+
+        // Navigation
+        self.bind_named(Key(key_flags::META | key_flags::CONTROL | 'f' as u32), goto_matching_fence, "goto-matching-fence"); // M-C-f
+
+        // Whitespace cleanup
+        self.bind_named(Key::ctlx('t'), trim_line, "trim-line"); // C-x t
     }
 }
 
@@ -1791,6 +1813,270 @@ pub mod commands {
             editor.display.set_message("Aborted");
             return Ok(CommandStatus::Abort);
         }
+
+        Ok(CommandStatus::Success)
+    }
+
+    /// List all key bindings in a help buffer (F1)
+    pub fn describe_bindings(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.describe_bindings();
+        Ok(CommandStatus::Success)
+    }
+
+    /// Jump to matching fence character (bracket, paren, brace) (M-C-f)
+    pub fn goto_matching_fence(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        let cursor_line = editor.current_window().cursor_line();
+        let cursor_col = editor.current_window().cursor_col();
+
+        // Get character at cursor
+        let ch = if let Some(line) = editor.current_buffer().line(cursor_line) {
+            let text = line.text();
+            if cursor_col < text.len() {
+                text[cursor_col..].chars().next()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let ch = match ch {
+            Some(c) => c,
+            None => {
+                editor.display.set_message("Not on a fence character");
+                return Ok(CommandStatus::Failure);
+            }
+        };
+
+        // Determine the matching fence and search direction
+        let (target, forward) = match ch {
+            '(' => (')', true),
+            ')' => ('(', false),
+            '[' => (']', true),
+            ']' => ('[', false),
+            '{' => ('}', true),
+            '}' => ('{', false),
+            '<' => ('>', true),
+            '>' => ('<', false),
+            _ => {
+                editor.display.set_message("Not on a fence character");
+                return Ok(CommandStatus::Failure);
+            }
+        };
+
+        let line_count = editor.current_buffer().line_count();
+        let mut depth = 1;
+
+        if forward {
+            // Search forward
+            let mut line_idx = cursor_line;
+            let mut col = cursor_col + ch.len_utf8(); // Start after current char
+
+            while line_idx < line_count && depth > 0 {
+                if let Some(line) = editor.current_buffer().line(line_idx) {
+                    let text = line.text();
+                    for (pos, c) in text[col..].char_indices() {
+                        if c == ch {
+                            depth += 1;
+                        } else if c == target {
+                            depth -= 1;
+                            if depth == 0 {
+                                // Found match
+                                let match_col = col + pos;
+                                editor.current_window_mut().set_cursor(line_idx, match_col);
+                                editor.ensure_cursor_visible();
+                                return Ok(CommandStatus::Success);
+                            }
+                        }
+                    }
+                }
+                line_idx += 1;
+                col = 0;
+            }
+        } else {
+            // Search backward
+            let mut line_idx = cursor_line;
+            let mut search_up_to = cursor_col;
+
+            loop {
+                if let Some(line) = editor.current_buffer().line(line_idx) {
+                    let text = line.text();
+                    let slice = &text[..search_up_to];
+
+                    // Search backward through characters
+                    for (pos, c) in slice.char_indices().rev() {
+                        if c == ch {
+                            depth += 1;
+                        } else if c == target {
+                            depth -= 1;
+                            if depth == 0 {
+                                // Found match
+                                editor.current_window_mut().set_cursor(line_idx, pos);
+                                editor.ensure_cursor_visible();
+                                return Ok(CommandStatus::Success);
+                            }
+                        }
+                    }
+                }
+
+                if line_idx == 0 {
+                    break;
+                }
+                line_idx -= 1;
+                // For previous lines, search from end
+                search_up_to = editor.current_buffer()
+                    .line(line_idx)
+                    .map(|l| l.len())
+                    .unwrap_or(0);
+            }
+        }
+
+        editor.display.set_message("No matching fence found");
+        Ok(CommandStatus::Failure)
+    }
+
+    /// Remove trailing whitespace from current line, or all lines with prefix arg
+    pub fn trim_line(editor: &mut EditorState, f: bool, _n: i32) -> Result<CommandStatus> {
+        let mut trimmed_count = 0;
+
+        if f {
+            // With prefix arg, trim all lines in buffer
+            let line_count = editor.current_buffer().line_count();
+            for line_idx in 0..line_count {
+                if trim_line_trailing_whitespace(editor, line_idx) {
+                    trimmed_count += 1;
+                }
+            }
+            if trimmed_count > 0 {
+                editor.current_buffer_mut().set_modified(true);
+                editor.display.set_message(&format!("Trimmed {} lines", trimmed_count));
+            } else {
+                editor.display.set_message("No trailing whitespace found");
+            }
+        } else {
+            // Without prefix arg, trim current line only
+            let cursor_line = editor.current_window().cursor_line();
+            if trim_line_trailing_whitespace(editor, cursor_line) {
+                editor.current_buffer_mut().set_modified(true);
+                editor.display.set_message("Trailing whitespace removed");
+            } else {
+                editor.display.set_message("No trailing whitespace");
+            }
+            // Make sure cursor doesn't go past end of line
+            let line_len = editor.current_buffer()
+                .line(cursor_line)
+                .map(|l| l.len())
+                .unwrap_or(0);
+            let cursor_col = editor.current_window().cursor_col();
+            if cursor_col > line_len {
+                editor.current_window_mut().set_cursor(cursor_line, line_len);
+            }
+        }
+
+        Ok(CommandStatus::Success)
+    }
+
+    /// Helper: trim trailing whitespace from a single line, returns true if modified
+    fn trim_line_trailing_whitespace(editor: &mut EditorState, line_idx: usize) -> bool {
+        // Get the lengths we need before borrowing mutably
+        let (new_len, old_len) = if let Some(line) = editor.current_buffer().line(line_idx) {
+            let text = line.text();
+            let trimmed_len = text.trim_end().len();
+            (trimmed_len, text.len())
+        } else {
+            return false;
+        };
+
+        if new_len < old_len {
+            // There was trailing whitespace
+            if let Some(line_mut) = editor.current_buffer_mut().line_mut(line_idx) {
+                line_mut.delete_range(new_len, old_len);
+            }
+            return true;
+        }
+        false
+    }
+
+    /// Count words in buffer or region (M-=)
+    pub fn word_count(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        // Check if region is active (mark is set)
+        let region = get_region(editor);
+
+        let (lines, words, chars, description) = if let Some((start_line, start_col, end_line, end_col)) = region {
+            // Count in region
+            let mut line_count = 0;
+            let mut word_count = 0;
+            let mut char_count = 0;
+            let mut in_word = false;
+
+            for line_idx in start_line..=end_line {
+                if let Some(line) = editor.current_buffer().line(line_idx) {
+                    let text = line.text();
+                    let start = if line_idx == start_line { start_col } else { 0 };
+                    let end = if line_idx == end_line { end_col } else { text.len() };
+
+                    // Get the slice of text in the region
+                    let slice = if end > start && end <= text.len() {
+                        &text[start..end]
+                    } else {
+                        ""
+                    };
+
+                    for ch in slice.chars() {
+                        char_count += 1;
+                        if ch.is_whitespace() {
+                            in_word = false;
+                        } else if !in_word {
+                            word_count += 1;
+                            in_word = true;
+                        }
+                    }
+
+                    // Count newline as character (except for last line of region)
+                    if line_idx < end_line {
+                        char_count += 1; // newline
+                        in_word = false;
+                        line_count += 1;
+                    }
+                }
+            }
+            line_count += 1; // Count the region span as at least 1 line
+
+            (line_count, word_count, char_count, "Region")
+        } else {
+            // Count in entire buffer
+            let mut line_count = editor.current_buffer().line_count();
+            let mut word_count = 0;
+            let mut char_count = 0;
+            let mut in_word = false;
+
+            for line_idx in 0..line_count {
+                if let Some(line) = editor.current_buffer().line(line_idx) {
+                    let text = line.text();
+                    for ch in text.chars() {
+                        char_count += 1;
+                        if ch.is_whitespace() {
+                            in_word = false;
+                        } else if !in_word {
+                            word_count += 1;
+                            in_word = true;
+                        }
+                    }
+                    // Count newline as character (except for last line)
+                    if line_idx + 1 < line_count {
+                        char_count += 1; // newline
+                        in_word = false;
+                    }
+                }
+            }
+
+            (line_count, word_count, char_count, "Buffer")
+        };
+
+        editor.display.set_message(&format!(
+            "{}: {} lines, {} words, {} characters",
+            description, lines, words, chars
+        ));
 
         Ok(CommandStatus::Success)
     }

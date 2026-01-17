@@ -14,13 +14,14 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 
 | Category | Features |
 |----------|----------|
-| **Navigation** | Cursor (C-f/b/n/p, arrows), words (M-f/b), lines (C-a/e), pages (C-v, M-v), buffer (M-<, M->), paragraphs (M-{ M-}) |
-| **Editing** | Insert, delete (C-d, Backspace), kill line (C-k), yank (C-y), kill word (M-d), transpose (C-t), quote (C-q), fill paragraph (M-q), just-one-space (M-SPC), delete-horizontal-space (M-\), delete-blank-lines (C-x C-o), tab-to-tab-stop (M-i) |
+| **Navigation** | Cursor (C-f/b/n/p, arrows), words (M-f/b), lines (C-a/e), pages (C-v, M-v), buffer (M-<, M->), paragraphs (M-{ M-}), matching fence (M-C-f) |
+| **Editing** | Insert, delete (C-d, Backspace), kill line (C-k), yank (C-y), kill word (M-d), transpose (C-t), quote (C-q), fill paragraph (M-q), just-one-space (M-SPC), delete-horizontal-space (M-\), delete-blank-lines (C-x C-o), tab-to-tab-stop (M-i), trim-line (C-x t) |
 | **Case** | Upcase word (M-u), downcase word (M-l), capitalize (M-c), upcase region (C-x C-u), downcase region (C-x C-l) |
 | **Mark/Region** | Set mark (C-space), kill region (C-w), copy region (M-w), exchange point/mark (C-x C-x) |
 | **Search** | Incremental search (C-s, C-r), query replace (M-%), replace-string (M-r), hunt forward/backward (M-s, M-S) |
 | **Files** | Open (C-x C-f), save (C-x C-s), quit (C-x C-c) |
-| **Buffers** | Switch (C-x b), list (C-x C-b), kill (C-x k), next/prev (C-x n/p), goto line (M-g), shell command (M-!), cursor position (C-x =), describe-key (M-?) |
+| **Buffers** | Switch (C-x b), list (C-x C-b), kill (C-x k), next/prev (C-x n/p), goto line (M-g), shell command (M-!) |
+| **Info/Help** | Cursor position (C-x =), describe-key (M-?), describe-bindings (F1), word-count (M-=) |
 | **Windows** | Split (C-x 2), delete (C-x 0/1), switch (C-x o), enlarge (C-x ^), shrink (C-x v) |
 | **Undo** | Undo (C-/ or C-_) with operation grouping |
 | **Macros** | Record (C-x (), stop (C-x )), execute (C-x e) |
@@ -61,9 +62,12 @@ C-x (  start recording   C-space  set mark       C-x n  next buffer
 C-x )  stop recording    C-x C-x  exchange       C-x p  prev buffer
 C-x e  execute macro
 
-Other:
-C-u      prefix arg      C-g      abort          C-l      refresh
-C-/ C-_  undo
+Help/Info:           Navigation:           Other:
+F1     describe bindings M-C-f  match fence    C-u      prefix arg
+M-?    describe key      M-{/}  paragraph      C-g      abort
+M-=    word count                               C-l      refresh
+C-x =  cursor position                          C-/ C-_  undo
+C-x t  trim line
 ```
 
 ## Build Commands

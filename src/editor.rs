@@ -1739,6 +1739,58 @@ impl EditorState {
         count
     }
 
+    /// Create or update the help buffer showing all key bindings
+    pub fn describe_bindings(&mut self) {
+        use crate::input::Key;
+
+        // Generate bindings content
+        let mut content = String::new();
+        content.push_str("Key Bindings\n");
+        content.push_str("============\n\n");
+
+        // Get all bindings from keytab
+        let bindings = self.keytab.all_bindings();
+
+        // Group by command name for easier reading
+        let mut prev_name = "";
+        for (code, name) in &bindings {
+            // Add blank line between different commands
+            if !prev_name.is_empty() && *name != prev_name {
+                // Only add newline for visual grouping occasionally
+            }
+            prev_name = name;
+
+            let key = Key(*code);
+            content.push_str(&format!("{:<20} {}\n", key.display_name(), name));
+        }
+
+        content.push_str(&format!("\n{} bindings total\n", bindings.len()));
+
+        // Find or create the *Help* buffer
+        let help_buf_name = "*Help*";
+        if let Some(idx) = self.buffers.iter().position(|b| b.name() == help_buf_name) {
+            // Update existing buffer
+            self.buffers[idx].set_content(&content);
+            // Switch to it
+            if let Some(window) = self.windows.get_mut(self.current_window) {
+                window.set_buffer_idx(idx);
+                window.set_cursor(0, 0);
+            }
+        } else {
+            // Create new buffer
+            let buffer = Buffer::from_content(help_buf_name, &content);
+            self.buffers.push(buffer);
+            let idx = self.buffers.len() - 1;
+            if let Some(window) = self.windows.get_mut(self.current_window) {
+                window.set_buffer_idx(idx);
+                window.set_cursor(0, 0);
+            }
+        }
+
+        self.display.force_redraw();
+        self.display.set_message("Type C-x b to return to previous buffer");
+    }
+
     /// Create or update the buffer list and switch to it
     pub fn list_buffers(&mut self) {
         // Generate buffer list content

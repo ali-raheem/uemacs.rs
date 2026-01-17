@@ -32,6 +32,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `C-x C-o` - Delete blank lines (delete blank lines around cursor)
   - `M-i` - Tab to tab stop (insert spaces to next tab stop)
   - `M-?` - Describe key (show what command a key is bound to)
+  - `F1` - Describe bindings (list all key bindings in a help buffer)
+  - `M-=` - Word count (count words, lines, and characters in buffer or region)
+  - `C-x t` - Trim line (remove trailing whitespace; with C-u, trim all lines)
+
+- **Navigation Enhancements**
+  - `M-C-f` - Goto matching fence (jump to matching bracket, paren, or brace)
 
 - **Search Enhancements**
   - `M-r` - Replace string (non-interactive search and replace all)
