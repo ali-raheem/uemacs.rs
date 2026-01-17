@@ -23,17 +23,18 @@ cargo build --release
 
 ## Features
 
-- Emacs-style keybindings (C-f, C-b, C-n, C-p, C-x, M-x, etc.)
-- Multiple buffers and split windows
-- Incremental search and query-replace
-- Kill ring (clipboard) with yank
-- Undo support with operation grouping
-- Keyboard macros (record, playback)
-- Word/region case operations (upcase, downcase, capitalize)
-- Paragraph operations (movement, fill)
-- Shell command execution
-- UTF-8/Unicode text handling
-- Cross-platform (Windows, Linux, macOS)
+- **Navigation** - Character, word, line, page, buffer, paragraph movement
+- **Editing** - Kill/yank, transpose, fill paragraph, zap-to-char
+- **Search** - Incremental search, query-replace, replace-string, hunt repeat
+- **Buffers** - Multiple buffers, split windows, buffer cycling
+- **Files** - Open, save, Save As, insert file, read-only toggle
+- **Macros** - Record, playback, named macro slots (0-9)
+- **Case** - Upcase/downcase/capitalize word and region
+- **Shell** - Execute commands, filter buffer through shell
+- **Help** - Describe key, list all bindings
+- **Undo** - Full undo with operation grouping
+- **UTF-8** - Full Unicode text handling
+- **Cross-platform** - Windows, Linux, macOS
 
 ## Usage
 
@@ -55,18 +56,61 @@ cargo run --release -- filename.txt
 
 ## Key Bindings
 
+### Navigation
 | Key | Action | Key | Action |
 |-----|--------|-----|--------|
-| C-f/C-b | Forward/backward char | C-x C-f | Open file |
-| C-n/C-p | Next/previous line | C-x C-s | Save file |
-| C-a/C-e | Beginning/end of line | C-x C-c | Quit |
-| C-v/M-v | Page down/up | C-x b | Switch buffer |
-| C-s/C-r | Search forward/backward | C-x 2 | Split window |
-| C-k | Kill line | C-x o | Other window |
-| C-y | Yank (paste) | C-x 1 | One window |
-| C-w | Kill region | C-space | Set mark |
-| C-/ | Undo | C-g | Abort |
-| M-% | Query replace | C-l | Refresh screen |
+| C-f/C-b | Forward/backward char | M-f/M-b | Forward/backward word |
+| C-n/C-p | Next/previous line | C-v/M-v | Page down/up |
+| C-a/C-e | Beginning/end of line | M-m | Back to indentation |
+| M-</M-> | Beginning/end of buffer | M-{/M-} | Backward/forward paragraph |
+| M-C-f | Goto matching fence | | |
+
+### Editing
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| C-d | Delete char forward | C-k | Kill line |
+| C-y | Yank (paste) | C-w | Kill region |
+| M-w | Copy region | C-t | Transpose chars |
+| M-d | Kill word | M-z | Zap to char |
+| C-/ | Undo | M-q | Fill paragraph |
+| C-x t | Trim trailing whitespace | | |
+
+### Search & Replace
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| C-s/C-r | Search forward/backward | M-s/M-S | Hunt forward/backward |
+| M-% | Query replace | M-r | Replace string (all) |
+
+### Files & Buffers
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| C-x C-f | Open file | C-x C-s | Save file |
+| C-x C-w | Write file (Save As) | C-x i | Insert file |
+| C-x b | Switch buffer | C-x C-b | List buffers |
+| C-x k | Kill buffer | C-x n/p | Next/prev buffer |
+| C-x C-q | Toggle read-only | C-x C-c | Quit |
+
+### Windows
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| C-x 2 | Split window | C-x 1 | One window |
+| C-x 0 | Delete window | C-x o | Other window |
+| C-x ^ | Enlarge window | C-x v | Shrink window |
+
+### Macros
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| C-x ( | Start recording | C-x ) | Stop recording |
+| C-x e | Execute macro | C-x M-s | Store to slot 0-9 |
+| C-x M-l | Load from slot | | |
+
+### Help
+| Key | Action |
+|-----|--------|
+| F1 | List all key bindings |
+| M-? | Describe key |
+| M-= | Word count |
+| C-x = | Cursor position info |
 
 **Note:** `C-` = Ctrl, `M-` = Alt or ESC prefix, `C-x` = Ctrl-X prefix
 

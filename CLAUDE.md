@@ -14,12 +14,12 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 
 | Category | Features |
 |----------|----------|
-| **Navigation** | Cursor (C-f/b/n/p, arrows), words (M-f/b), lines (C-a/e), pages (C-v, M-v), buffer (M-<, M->), paragraphs (M-{ M-}), matching fence (M-C-f) |
-| **Editing** | Insert, delete (C-d, Backspace), kill line (C-k), yank (C-y), kill word (M-d), transpose (C-t), quote (C-q), fill paragraph (M-q), just-one-space (M-SPC), delete-horizontal-space (M-\), delete-blank-lines (C-x C-o), tab-to-tab-stop (M-i), trim-line (C-x t) |
+| **Navigation** | Cursor (C-f/b/n/p, arrows), words (M-f/b), lines (C-a/e), back-to-indent (M-m), pages (C-v, M-v), buffer (M-<, M->), paragraphs (M-{ M-}), matching fence (M-C-f) |
+| **Editing** | Insert, delete (C-d, Backspace), kill line (C-k), yank (C-y), kill word (M-d), transpose (C-t), quote (C-q), fill paragraph (M-q), just-one-space (M-SPC), delete-horizontal-space (M-\), delete-blank-lines (C-x C-o), tab-to-tab-stop (M-i), trim-line (C-x t), zap-to-char (M-z) |
 | **Case** | Upcase word (M-u), downcase word (M-l), capitalize (M-c), upcase region (C-x C-u), downcase region (C-x C-l) |
 | **Mark/Region** | Set mark (C-space), kill region (C-w), copy region (M-w), exchange point/mark (C-x C-x) |
 | **Search** | Incremental search (C-s, C-r), query replace (M-%), replace-string (M-r), hunt forward/backward (M-s, M-S) |
-| **Files** | Open (C-x C-f), save (C-x C-s), insert (C-x i), quit (C-x C-c) |
+| **Files** | Open (C-x C-f), save (C-x C-s), write-file (C-x C-w), insert (C-x i), read-only toggle (C-x C-q), quit (C-x C-c) |
 | **Shell** | Shell command (M-!), filter buffer (C-x \|) |
 | **Buffers** | Switch (C-x b), list (C-x C-b), kill (C-x k), next/prev (C-x n/p), goto line (M-g), shell command (M-!) |
 | **Info/Help** | Cursor position (C-x =), describe-key (M-?), describe-bindings (F1), word-count (M-=) |

@@ -50,6 +50,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `C-x M-l` - Load macro from slot (load macro from slot 0-9)
   - `C-u <n> C-x e` - Execute macro from slot n (0-9)
 
+- **Additional File Operations**
+  - `C-x C-w` - Write file (Save As - save buffer to a new filename)
+  - `M-~` - Not modified (clear the modification flag)
+  - `C-x C-q` - Toggle read-only mode
+
+- **Additional Navigation**
+  - `M-m` - Back to indentation (move to first non-whitespace on line)
+
+- **Additional Editing**
+  - `M-z` - Zap to char (delete from cursor up to and including specified character)
+
 - **Search Enhancements**
   - `M-r` - Replace string (non-interactive search and replace all)
   - `M-s` - Hunt forward (repeat last search forward)

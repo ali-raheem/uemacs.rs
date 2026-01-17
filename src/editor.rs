@@ -74,6 +74,7 @@ pub enum PromptAction {
     ReplaceStringReplace, // Non-interactive replace: enter replacement string
     ShellCommand,         // Execute shell command
     FilterBuffer,         // Pipe buffer through shell command
+    WriteFile,            // Save buffer to a new filename
 }
 
 /// Minibuffer prompt state
@@ -1393,6 +1394,13 @@ impl EditorState {
                 }
                 self.filter_buffer(&input);
             }
+            PromptAction::WriteFile => {
+                if input.is_empty() {
+                    self.display.set_message("No file name");
+                    return Ok(());
+                }
+                self.write_file(&input);
+            }
             PromptAction::None => {}
         }
         Ok(())
@@ -2044,6 +2052,54 @@ impl EditorState {
         self.macro_state.playing = false;
 
         Ok(())
+    }
+
+    /// Write buffer to a new filename (Save As)
+    pub fn write_file(&mut self, filename: &str) {
+        use std::fs::File;
+        use std::io::Write;
+        use std::path::PathBuf;
+
+        let path = PathBuf::from(filename);
+
+        // Collect buffer content
+        let mut content = String::new();
+        let line_count = self.current_buffer().line_count();
+        for i in 0..line_count {
+            if let Some(line) = self.current_buffer().line(i) {
+                content.push_str(line.text());
+                if i + 1 < line_count {
+                    content.push('\n');
+                }
+            }
+        }
+
+        match File::create(&path) {
+            Ok(mut file) => {
+                match file.write_all(content.as_bytes()) {
+                    Ok(()) => {
+                        // Update buffer's filename and clear modified flag
+                        self.current_buffer_mut().set_filename(path.clone());
+                        self.current_buffer_mut().set_modified(false);
+                        // Update buffer name to match new filename
+                        let name = path.file_name()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| filename.to_string());
+                        self.current_buffer_mut().set_name(&name);
+                        self.display.set_message(&format!(
+                            "Wrote {} lines to {}",
+                            line_count, filename
+                        ));
+                    }
+                    Err(e) => {
+                        self.display.set_message(&format!("Error writing file: {}", e));
+                    }
+                }
+            }
+            Err(e) => {
+                self.display.set_message(&format!("Cannot create {}: {}", filename, e));
+            }
+        }
     }
 
     /// Insert file contents at current cursor position

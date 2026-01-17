@@ -101,6 +101,7 @@ impl KeyTable {
         self.bind_named(Key::ctrl('p'), previous_line, "previous-line");
         self.bind_named(Key::ctrl('a'), beginning_of_line, "beginning-of-line");
         self.bind_named(Key::ctrl('e'), end_of_line, "end-of-line");
+        self.bind_named(Key::meta('m'), back_to_indentation, "back-to-indentation"); // M-m
 
         // Page movement
         self.bind_named(Key::ctrl('v'), scroll_down, "scroll-down");
@@ -132,6 +133,7 @@ impl KeyTable {
         self.bind_named(Key::special(0x53), delete_char_forward, "delete-char"); // Delete key
         self.bind_named(Key(0x7f), delete_char_backward, "delete-backward-char");         // Backspace
         self.bind_named(Key::ctrl('h'), delete_char_backward, "delete-backward-char");    // C-h also backspace
+        self.bind_named(Key::meta('z'), zap_to_char, "zap-to-char"); // M-z
 
         self.bind_named(Key::ctrl('k'), kill_line, "kill-line");
         self.bind_named(Key::ctrl('y'), yank, "yank");
@@ -146,7 +148,10 @@ impl KeyTable {
 
         // File operations
         self.bind_named(Key::ctlx_ctrl('s'), save_buffer, "save-buffer");
+        self.bind_named(Key::ctlx_ctrl('w'), write_file, "write-file"); // C-x C-w
         self.bind_named(Key::ctlx('i'), insert_file, "insert-file"); // C-x i
+        self.bind_named(Key::meta('~'), not_modified, "not-modified"); // M-~
+        self.bind_named(Key::ctlx_ctrl('q'), toggle_read_only, "toggle-read-only"); // C-x C-q
 
         // Word operations
         self.bind_named(Key::meta('f'), forward_word, "forward-word");
@@ -310,6 +315,29 @@ pub mod commands {
     /// Move cursor to end of line
     pub fn end_of_line(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
         editor.move_to_eol();
+        Ok(CommandStatus::Success)
+    }
+
+    /// Move cursor to first non-whitespace character on line (M-m)
+    pub fn back_to_indentation(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        let cursor_line = editor.current_window().cursor_line();
+
+        if let Some(line) = editor.current_buffer().line(cursor_line) {
+            let text = line.text();
+            let mut col = 0;
+
+            // Find first non-whitespace character
+            for (pos, ch) in text.char_indices() {
+                if !ch.is_whitespace() {
+                    col = pos;
+                    break;
+                }
+                col = pos + ch.len_utf8(); // Will be at end if all whitespace
+            }
+
+            editor.current_window_mut().set_cursor(cursor_line, col);
+        }
+
         Ok(CommandStatus::Success)
     }
 
@@ -694,6 +722,125 @@ pub mod commands {
     pub fn quote_char(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
         editor.quote_pending = true;
         editor.display.set_message("C-q");
+        Ok(CommandStatus::Success)
+    }
+
+    /// Zap to character - delete from cursor up to and including specified char (M-z)
+    pub fn zap_to_char(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus> {
+        editor.display.set_message("Zap to char: ");
+        editor.display.force_redraw();
+
+        // Read the target character
+        let target = if let Ok(Some(key)) = editor.read_key_for_describe() {
+            if let Some(ch) = key.base_char() {
+                ch
+            } else {
+                editor.display.set_message("Aborted");
+                return Ok(CommandStatus::Abort);
+            }
+        } else {
+            editor.display.set_message("Aborted");
+            return Ok(CommandStatus::Abort);
+        };
+
+        let count = n.abs().max(1) as usize;
+        let forward = n >= 0;
+
+        editor.start_kill();
+
+        for _ in 0..count {
+            let cursor_line = editor.current_window().cursor_line();
+            let cursor_col = editor.current_window().cursor_col();
+            let line_count = editor.current_buffer().line_count();
+
+            if forward {
+                // Search forward for target character
+                let mut found = false;
+                let mut search_line = cursor_line;
+                let mut search_col = cursor_col;
+
+                'outer: while search_line < line_count {
+                    if let Some(line) = editor.current_buffer().line(search_line) {
+                        let text = line.text();
+                        let start = if search_line == cursor_line { search_col } else { 0 };
+
+                        for (pos, ch) in text[start..].char_indices() {
+                            if ch == target {
+                                // Found - delete from cursor to here (inclusive)
+                                let end_col = start + pos + ch.len_utf8();
+
+                                // Delete the region
+                                if search_line == cursor_line {
+                                    // Same line
+                                    let killed = text[cursor_col..end_col].to_string();
+                                    editor.kill_append(&killed);
+                                    if let Some(line_mut) = editor.current_buffer_mut().line_mut(cursor_line) {
+                                        line_mut.delete_range(cursor_col, end_col);
+                                    }
+                                    editor.current_buffer_mut().set_modified(true);
+                                } else {
+                                    // Multi-line - collect and delete
+                                    let mut killed = String::new();
+
+                                    // Rest of start line
+                                    if let Some(start_line) = editor.current_buffer().line(cursor_line) {
+                                        killed.push_str(&start_line.text()[cursor_col..]);
+                                        killed.push('\n');
+                                    }
+
+                                    // Middle lines
+                                    for mid_line in (cursor_line + 1)..search_line {
+                                        if let Some(line) = editor.current_buffer().line(mid_line) {
+                                            killed.push_str(line.text());
+                                            killed.push('\n');
+                                        }
+                                    }
+
+                                    // Part of end line
+                                    killed.push_str(&text[..end_col]);
+                                    editor.kill_append(&killed);
+
+                                    // Delete from end backwards
+                                    // Delete from cursor_col to end of cursor_line
+                                    if let Some(line_mut) = editor.current_buffer_mut().line_mut(cursor_line) {
+                                        let len = line_mut.len();
+                                        line_mut.delete_range(cursor_col, len);
+                                    }
+
+                                    // Delete intermediate lines
+                                    for _ in (cursor_line + 1)..=search_line {
+                                        // Join with next line and delete up to end_col
+                                        editor.current_buffer_mut().join_line(cursor_line);
+                                    }
+
+                                    // Now delete up to end_col from the joined line
+                                    if let Some(line_mut) = editor.current_buffer_mut().line_mut(cursor_line) {
+                                        line_mut.delete_range(cursor_col, cursor_col + end_col);
+                                    }
+                                    editor.current_buffer_mut().set_modified(true);
+                                }
+
+                                found = true;
+                                break 'outer;
+                            }
+                        }
+                    }
+                    search_line += 1;
+                    search_col = 0;
+                }
+
+                if !found {
+                    editor.display.set_message(&format!("'{}' not found", target));
+                    return Ok(CommandStatus::Failure);
+                }
+            } else {
+                // Search backward for target character
+                editor.display.set_message("Backward zap not yet implemented");
+                return Ok(CommandStatus::Failure);
+            }
+        }
+
+        editor.display.clear_message();
         Ok(CommandStatus::Success)
     }
 
@@ -1325,6 +1472,36 @@ pub mod commands {
         editor.current_window_mut().clear_mark();
         editor.display.set_message("Region copied");
 
+        Ok(CommandStatus::Success)
+    }
+
+    /// Clear modified flag (M-~)
+    pub fn not_modified(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        editor.current_buffer_mut().set_modified(false);
+        editor.display.set_message("Modification flag cleared");
+        Ok(CommandStatus::Success)
+    }
+
+    /// Toggle read-only mode (C-x C-q)
+    pub fn toggle_read_only(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        let is_read_only = editor.current_buffer().modes().view;
+        editor.current_buffer_mut().modes_mut().view = !is_read_only;
+
+        if !is_read_only {
+            editor.display.set_message("Buffer is now read-only");
+        } else {
+            editor.display.set_message("Buffer is now writable");
+        }
+        Ok(CommandStatus::Success)
+    }
+
+    /// Write buffer to a new file (Save As) (C-x C-w)
+    pub fn write_file(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+        // Default to current filename if any
+        let default = editor.current_buffer()
+            .filename()
+            .map(|p| p.display().to_string());
+        editor.start_prompt("Write file", crate::editor::PromptAction::WriteFile, default);
         Ok(CommandStatus::Success)
     }
 

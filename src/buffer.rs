@@ -154,6 +154,11 @@ impl Buffer {
         &self.name
     }
 
+    /// Set buffer name
+    pub fn set_name(&mut self, name: &str) {
+        self.name = name.to_string();
+    }
+
     /// Get filename if set
     pub fn filename(&self) -> Option<&PathBuf> {
         self.filename.as_ref()
