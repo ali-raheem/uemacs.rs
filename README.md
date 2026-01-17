@@ -3,7 +3,8 @@
 [![Crates.io](https://img.shields.io/crates/v/uemacs.svg)](https://crates.io/crates/uemacs)
 [![License](https://img.shields.io/crates/l/uemacs.svg)](https://github.com/ali-raheem/uemacs.rs/blob/master/LICENSE.txt)
 
-A Rust port of [uEmacs/PK](https://git.kernel.org/pub/scm/editors/uemacs/uemacs.git), the lightweight Emacs-style text editor.
+A complete loose re-write in Rust of [uEmacs/PK](https://git.kernel.org/pub/scm/editors/uemacs/uemacs.git), the lightweight Emacs-style text editor.
+Mostly vibe coded with Claude Code.
 
 ## Installation
 
@@ -116,4 +117,23 @@ cargo run --release -- filename.txt
 
 ## License
 
-Based on uEmacs/PK 4.0 by Petri Kutvonen, which is based on MicroEMACS 3.9 by Daniel M. Lawrence. Free for non-commercial use. See [LICENSE.txt](LICENSE.txt) for details.
+To stay in line with spirit of the original license of uEmacs/PK 4.0 whos code was used as reference this is licensed under PolyForm Noncommercial 1.0.0.
+Please see LICENSE.txt, I hope to release this under a more permissive license if possible.
+
+Based on uEmacs/PK 4.0 by Petri Kutvonen, which is based on MicroEMACS 3.9 by Daniel M. Lawrence. Free for non-commercial use.
+
+### Original Copyright Notice for uEmacs/PK 4.0
+
+Copyright Notices:
+
+MicroEMACS 3.9 (c) Copyright 1987 Daniel M. Lawrence.
+Reference Manual Copyright 1987 by Brian Straight and
+Daniel M. Lawrence. No copyright claimed for modifications
+made by Petri H. Kutvonen.
+
+Original statement of copying policy:
+
+MicroEMACS 3.9 can be copied and distributed freely for any
+non-commercial purposes. MicroEMACS 3.9 can only be incorporated
+into commercial software with the permission of the current author
+Daniel M. Lawrence].
