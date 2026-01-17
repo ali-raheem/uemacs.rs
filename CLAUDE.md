@@ -20,7 +20,7 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 | **Mark/Region** | Set mark (C-space), kill region (C-w), copy region (M-w), exchange point/mark (C-x C-x) |
 | **Search** | Incremental search (C-s, C-r), query replace (M-%), replace-string (M-r), hunt forward/backward (M-s, M-S) |
 | **Files** | Open (C-x C-f), save (C-x C-s), write-file (C-x C-w), insert (C-x i), read-only toggle (C-x C-q), quit (C-x C-c) |
-| **Shell** | Shell command (M-!), filter buffer (C-x \|) |
+| **Shell** | Shell command (M-!), shell on region (M-\|), filter buffer (C-x \|) |
 | **Buffers** | Switch (C-x b), list (C-x C-b), kill (C-x k), next/prev (C-x n/p), goto line (M-g), shell command (M-!) |
 | **Info/Help** | Cursor position (C-x =), describe-key (M-?), describe-bindings (F1), word-count (M-=) |
 | **Windows** | Split (C-x 2), delete (C-x 0/1), switch (C-x o), enlarge (C-x ^), shrink (C-x v) |
@@ -37,6 +37,12 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 - Modify display.rs to render colored token spans
 - Cache tokenization results, invalidate on edits
 - Estimated: 1000-1500 LOC
+
+**Code Quality**
+- Extract pure text manipulation functions from commands (e.g., `transpose_chars_at(text, cursor) -> String`)
+- Add doc tests with usage examples that serve as both documentation and tests
+- Create `text_ops.rs` module for testable pure functions
+- Candidates: transpose_chars/words/lines, case operations, fill_paragraph, word/paragraph boundaries
 
 **Other Features**
 - Rectangle operations
@@ -73,7 +79,8 @@ C-x (  start recording   C-space  set mark       C-x n  next buffer
 C-x )  stop recording    C-x C-x  exchange       C-x p  prev buffer
 C-x e  execute macro
 C-x M-s store to slot    Files:                Shell:
-C-x M-l load from slot   C-x i  insert file     C-x |  filter buffer
+C-x M-l load from slot   C-x i  insert file     M-|    shell on region
+                                                C-x |  filter buffer
 
 Help/Info:           Navigation:           Other:
 F1     describe bindings M-C-f  match fence    C-u      prefix arg
