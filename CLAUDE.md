@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Goal
 
-Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serves as the reference implementation in `c-reference/`.
+A complete rewrite of uEmacs/PK 4.0 in Rust for modern platforms. This is a standalone Rust implementation inspired by the original C editor.
 
-## Progress Summary
+## Status
 
-**Status: ~99% Complete** - A fully functional text editor with comprehensive Emacs keybindings.
+**Complete** - A fully functional Emacs-style text editor with comprehensive keybindings, UTF-8 support, and modern Rust architecture.
 
 ### What Works
 
@@ -139,7 +139,7 @@ pub type CommandFn = fn(&mut EditorState, bool, i32) -> Result<CommandStatus>;
 
 ## C Reference
 
-Original C code in `c-reference/`. Key files:
+The original C code has been moved to `../uemacs-c-reference/` (outside this repository) since the Rust port is now complete. Key files in the reference:
 - `main.c` - Entry point, command loop
 - `display.c` - Screen update
 - `buffer.c`, `line.c` - Text storage
@@ -147,4 +147,4 @@ Original C code in `c-reference/`. Key files:
 - `search.c`, `isearch.c` - Search
 - `bind.c` - Key bindings
 
-Build with `cd c-reference && make`.
+The original can be obtained from: https://git.kernel.org/pub/scm/editors/uemacs/uemacs.git
