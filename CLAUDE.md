@@ -29,6 +29,16 @@ Port uEmacs/PK 4.0 from C to Rust for modern platforms. The original C code serv
 | **Prefix** | Universal argument (C-u) for repeat counts |
 
 ### Potential Future Enhancements
+
+**Syntax Highlighting** (Priority)
+- Stateful lexer with per-line tokenization and state carry-over
+- Language detection by file extension
+- Support for: Rust, C, Python, JavaScript, Markdown (minimum)
+- Modify display.rs to render colored token spans
+- Cache tokenization results, invalidate on edits
+- Estimated: 1000-1500 LOC
+
+**Other Features**
 - Rectangle operations
 - Customizable key bindings file
 - M-x command execution by name
