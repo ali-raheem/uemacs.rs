@@ -35,6 +35,7 @@ cargo build --release
 - **Help** - Describe key, list all bindings
 - **Undo** - Full undo with operation grouping
 - **UTF-8** - Full Unicode text handling
+- **Syntax Highlighting** - Built-in support for Rust, C/C++, Python, TOML, Markdown
 - **Region Highlighting** - Visual selection between mark and cursor
 - **Cross-platform** - Windows, Linux, macOS
 
@@ -115,6 +116,12 @@ cargo run --release -- filename.txt
 | M-= | Word count |
 | C-x = | Cursor position info |
 
+### Display
+| Key | Action |
+|-----|--------|
+| C-x # | Toggle line numbers |
+| C-x s | Toggle syntax highlighting |
+
 **Note:** `C-` = Ctrl, `M-` = Alt or ESC prefix, `C-x` = Ctrl-X prefix
 
 ## Configuration
@@ -124,6 +131,7 @@ uEmacs.rs reads configuration from `~/.uemacs.conf` (or `%USERPROFILE%\.uemacs.c
 ```ini
 # Display settings
 line-numbers = true
+syntax-highlighting = true
 
 # Auto-save (saves to #filename# periodically)
 auto-save = true

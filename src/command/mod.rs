@@ -160,6 +160,7 @@ impl KeyTable {
         // Screen refresh
         self.bind_named(Key::ctrl('l'), redraw_display, "redraw-display");
         self.bind_named(Key::ctlx('#'), toggle_line_numbers, "toggle-line-numbers");
+        self.bind_named(Key::ctlx('s'), toggle_syntax_highlighting, "toggle-syntax-highlighting");
 
         // Quit
         self.bind_named(Key::ctlx_ctrl('c'), quit, "save-buffers-kill-emacs");

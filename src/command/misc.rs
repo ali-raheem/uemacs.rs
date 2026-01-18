@@ -38,6 +38,19 @@ pub fn toggle_line_numbers(editor: &mut EditorState, _f: bool, _n: i32) -> Resul
     Ok(CommandStatus::Success)
 }
 
+/// Toggle syntax highlighting (C-x s)
+pub fn toggle_syntax_highlighting(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+    editor.syntax.toggle();
+    editor.force_redraw();
+    let status = if editor.syntax.enabled {
+        "Syntax highlighting enabled"
+    } else {
+        "Syntax highlighting disabled"
+    };
+    editor.display.set_message(status);
+    Ok(CommandStatus::Success)
+}
+
 /// Quit the editor
 pub fn quit(editor: &mut EditorState, f: bool, _n: i32) -> Result<CommandStatus> {
     // With prefix argument (C-u), force quit without checking

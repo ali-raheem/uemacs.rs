@@ -8,6 +8,7 @@ use crate::command::{CommandStatus, KeyTable};
 use crate::display::Display;
 use crate::error::Result;
 use crate::input::{InputState, Key};
+use crate::syntax::SyntaxManager;
 use crate::terminal::Terminal;
 use crate::window::Window;
 
@@ -63,6 +64,8 @@ pub struct EditorState {
     pub warn_unsaved: bool,
     /// Pending quit (waiting for confirmation after unsaved warning)
     pub pending_quit: bool,
+    /// Syntax highlighting manager
+    pub syntax: SyntaxManager,
 }
 
 /// Universal argument state for C-u prefix
@@ -243,6 +246,7 @@ impl EditorState {
             auto_save_enabled: true,
             warn_unsaved: true,
             pending_quit: false,
+            syntax: SyntaxManager::new(),
         }
     }
 
@@ -257,6 +261,9 @@ impl EditorState {
 
         // Warning settings
         self.warn_unsaved = config.warn_unsaved;
+
+        // Syntax highlighting settings
+        self.syntax.enabled = config.syntax_highlighting;
 
         // Load saved macros from disk
         self.load_macros_on_startup();
@@ -280,6 +287,9 @@ impl EditorState {
         self.buffers.push(buffer);
         let buf_idx = self.buffers.len() - 1;
 
+        // Set up syntax highlighting for this buffer
+        self.syntax.set_buffer_language(buf_idx, Some(path.as_path()));
+
         // Set current window to show the new buffer
         if let Some(window) = self.windows.get_mut(self.current_window) {
             window.set_buffer_idx(buf_idx);
@@ -300,6 +310,9 @@ impl EditorState {
         buffer.set_filename(path.clone());
         self.buffers.push(buffer);
         let buf_idx = self.buffers.len() - 1;
+
+        // Set up syntax highlighting for this buffer
+        self.syntax.set_buffer_language(buf_idx, Some(path.as_path()));
 
         // Set current window to show the new buffer
         if let Some(window) = self.windows.get_mut(self.current_window) {
@@ -370,6 +383,7 @@ impl EditorState {
                     &self.windows,
                     &self.buffers,
                     self.current_window,
+                    &mut self.syntax,
                 )?;
             }
         }
@@ -386,6 +400,7 @@ impl EditorState {
                 &self.windows,
                 &self.buffers,
                 self.current_window,
+                &mut self.syntax,
             )?;
 
             // Read and handle input
@@ -595,9 +610,18 @@ impl EditorState {
         self.current_buffer_mut()
             .insert_char(cursor_line, cursor_col, ch);
 
+        // Invalidate syntax highlighting from this line
+        self.invalidate_syntax_from(cursor_line);
+
         // Move cursor forward
         let new_col = cursor_col + ch.len_utf8();
         self.current_window_mut().set_cursor(cursor_line, new_col);
+    }
+
+    /// Invalidate syntax highlighting from a line onwards for the current buffer
+    pub fn invalidate_syntax_from(&mut self, line: usize) {
+        let buf_idx = self.current_window().buffer_idx();
+        self.syntax.invalidate_from(buf_idx, line);
     }
 
     /// Move cursor right

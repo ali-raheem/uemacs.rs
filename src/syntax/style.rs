@@ -92,6 +92,18 @@ impl Style {
         self
     }
 
+    /// Builder: set italic
+    pub fn with_italic(mut self) -> Self {
+        self.italic = true;
+        self
+    }
+
+    /// Builder: set underline
+    pub fn with_underline(mut self) -> Self {
+        self.underline = true;
+        self
+    }
+
     /// Check if this is the default (no styling)
     pub fn is_default(&self) -> bool {
         *self == Self::default()

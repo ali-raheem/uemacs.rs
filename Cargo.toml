@@ -1,6 +1,6 @@
 [package]
 name = "uemacs"
-version = "0.3.4"
+version = "0.4.0"
 edition = "2021"
 authors = ["Ali Raheem"]
 description = "uEmacs/PK text editor ported to Rust"
@@ -14,3 +14,5 @@ categories = ["command-line-utilities", "text-editors"]
 crossterm = "0.27"
 unicode-width = "0.1"
 thiserror = "1.0"
+regex = "1.10"
+toml = "0.8"

@@ -13,6 +13,7 @@ pub fn delete_char_forward(editor: &mut EditorState, f: bool, n: i32) -> Result<
     }
 
     editor.display.force_redraw();
+    let start_line = editor.current_window().cursor_line();
 
     if f {
         editor.start_kill();
@@ -43,6 +44,7 @@ pub fn delete_char_forward(editor: &mut EditorState, f: bool, n: i32) -> Result<
         }
     }
 
+    editor.invalidate_syntax_from(start_line);
     Ok(CommandStatus::Success)
 }
 
@@ -53,6 +55,7 @@ pub fn delete_char_backward(editor: &mut EditorState, f: bool, n: i32) -> Result
     }
 
     editor.display.force_redraw();
+    let start_line = editor.current_window().cursor_line();
 
     if f {
         editor.start_kill();
@@ -86,6 +89,8 @@ pub fn delete_char_backward(editor: &mut EditorState, f: bool, n: i32) -> Result
         }
     }
 
+    let end_line = editor.current_window().cursor_line();
+    editor.invalidate_syntax_from(end_line.min(start_line));
     Ok(CommandStatus::Success)
 }
 
@@ -126,6 +131,7 @@ pub fn kill_line(editor: &mut EditorState, f: bool, n: i32) -> Result<CommandSta
         }
     }
 
+    editor.invalidate_syntax_from(cursor_line);
     Ok(CommandStatus::Success)
 }
 
@@ -165,6 +171,7 @@ pub fn yank(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus>
     editor.last_was_yank = true;
     editor.reset_kill_ring_idx();
 
+    editor.invalidate_syntax_from(start_line);
     editor.ensure_cursor_visible();
     Ok(CommandStatus::Success)
 }
@@ -245,6 +252,8 @@ pub fn newline(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStat
         return Ok(CommandStatus::Failure);
     }
 
+    let start_line = editor.current_window().cursor_line();
+
     for _ in 0..n.max(1) {
         let cursor_line = editor.current_window().cursor_line();
         let cursor_col = editor.current_window().cursor_col();
@@ -255,6 +264,7 @@ pub fn newline(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStat
         editor.current_window_mut().set_cursor(cursor_line + 1, 0);
     }
 
+    editor.invalidate_syntax_from(start_line);
     editor.ensure_cursor_visible();
     Ok(CommandStatus::Success)
 }

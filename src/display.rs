@@ -2,7 +2,7 @@
 
 use crate::buffer::Buffer;
 use crate::error::Result;
-use crate::syntax::Style;
+use crate::syntax::{Span, Style, SyntaxManager};
 use crate::terminal::Terminal;
 use crate::window::Window;
 
@@ -128,6 +128,7 @@ impl Display {
         windows: &[Window],
         buffers: &[Buffer],
         current_window: usize,
+        syntax: &mut SyntaxManager,
     ) -> Result<()> {
         let cols = terminal.cols() as usize;
         let rows = terminal.rows();
@@ -139,7 +140,7 @@ impl Display {
         // Render each window
         for (i, window) in windows.iter().enumerate() {
             let is_current = i == current_window;
-            self.render_window(terminal, window, buffers, cols, is_current)?;
+            self.render_window(terminal, window, buffers, cols, is_current, syntax)?;
         }
 
         // Render minibuffer (message line) at bottom
@@ -165,18 +166,21 @@ impl Display {
         buffers: &[Buffer],
         cols: usize,
         is_current: bool,
+        syntax: &mut SyntaxManager,
     ) -> Result<()> {
         let buffer = match buffers.get(window.buffer_idx()) {
             Some(b) => b,
             None => return Ok(()),
         };
 
+        let buf_idx = window.buffer_idx();
         let top_row = window.top_row();
         let height = window.height() as usize;
         let top_line = window.top_line();
+        let line_count = buffer.line_count();
 
         // Calculate line number width
-        let lnum_width = self.line_number_width(buffer.line_count());
+        let lnum_width = self.line_number_width(line_count);
         let text_cols = cols.saturating_sub(lnum_width);
 
         // Get region if mark is set (only for current window)
@@ -209,9 +213,12 @@ impl Display {
                     terminal.set_dim(false)?;
                 }
 
-                // Render line content with possible region highlighting
+                // Get syntax highlighting spans for this line
                 let text = line.text();
-                self.render_line_with_region(terminal, text, line_idx, text_cols, &region)?;
+                let syntax_spans = syntax.highlight_line(buf_idx, line_idx, text, line_count);
+
+                // Render line content with syntax and region highlighting
+                self.render_line_with_highlighting(terminal, text, line_idx, text_cols, &region, &syntax_spans)?;
             } else {
                 // Empty line indicator (like vim's ~)
                 if self.show_line_numbers {
@@ -308,6 +315,74 @@ impl Display {
                         terminal.write_str(&display_after)?;
                     }
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Render a line with syntax highlighting and optional region highlighting
+    fn render_line_with_highlighting(
+        &self,
+        terminal: &mut Terminal,
+        text: &str,
+        line_idx: usize,
+        max_cols: usize,
+        region: &Option<Region>,
+        syntax_spans: &[Span],
+    ) -> Result<()> {
+        // Get region intersection if any
+        let region_intersection = region.as_ref().and_then(|r| r.line_intersection(line_idx, text.len()));
+
+        // If no syntax spans and no region, render plain
+        if syntax_spans.is_empty() && region_intersection.is_none() {
+            let display_text = truncate_to_width(text, max_cols);
+            terminal.write_str(&display_text)?;
+            return Ok(());
+        }
+
+        // Render character by character, applying styles
+        let mut display_col = 0;
+        let selection_style = Style::reverse();
+
+        for (byte_pos, ch) in text.char_indices() {
+            if display_col >= max_cols {
+                break;
+            }
+
+            let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+
+            // Check if in region (region takes precedence, uses reverse video)
+            let in_region = region_intersection
+                .map(|(start, end)| byte_pos >= start && byte_pos < end)
+                .unwrap_or(false);
+
+            // Find syntax style for this position
+            let syntax_style = syntax_spans
+                .iter()
+                .find(|span| byte_pos >= span.start && byte_pos < span.end)
+                .map(|span| span.style);
+
+            // Apply appropriate style
+            if in_region {
+                // Region highlighting (reverse video, merge with syntax colors)
+                if let Some(mut style) = syntax_style {
+                    style.reverse = true;
+                    terminal.apply_style(&style)?;
+                } else {
+                    terminal.apply_style(&selection_style)?;
+                }
+            } else if let Some(style) = syntax_style {
+                terminal.apply_style(&style)?;
+            }
+
+            // Write the character
+            terminal.write_char(ch)?;
+            display_col += ch_width;
+
+            // Reset if we applied any style
+            if in_region || syntax_style.is_some() {
+                terminal.reset_attributes()?;
             }
         }
 

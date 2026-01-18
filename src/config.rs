@@ -31,6 +31,8 @@ pub struct Config {
     pub tab_width: usize,
     /// Whether to warn before closing unsaved buffers
     pub warn_unsaved: bool,
+    /// Whether syntax highlighting is enabled
+    pub syntax_highlighting: bool,
 }
 
 impl Default for Config {
@@ -41,6 +43,7 @@ impl Default for Config {
             auto_save_interval: 30,
             tab_width: 8,
             warn_unsaved: true,
+            syntax_highlighting: true,
         }
     }
 }
@@ -125,6 +128,10 @@ impl Config {
         if let Some(value) = settings.get("warn-unsaved") {
             self.warn_unsaved = parse_bool(value);
         }
+
+        if let Some(value) = settings.get("syntax-highlighting") {
+            self.syntax_highlighting = parse_bool(value);
+        }
     }
 
     /// Save current configuration to file
@@ -137,12 +144,14 @@ impl Config {
                  auto-save = {}\n\
                  auto-save-interval = {}\n\
                  tab-width = {}\n\
-                 warn-unsaved = {}\n",
+                 warn-unsaved = {}\n\
+                 syntax-highlighting = {}\n",
                 self.show_line_numbers,
                 self.auto_save,
                 self.auto_save_interval,
                 self.tab_width,
-                self.warn_unsaved
+                self.warn_unsaved,
+                self.syntax_highlighting
             );
             fs::write(path, contents)?;
         }

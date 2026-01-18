@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Syntax Highlighting**
+  - Regex-based syntax highlighting with multi-line state tracking
+  - Built-in support for: Rust, C/C++, Python, TOML, Markdown
+  - Per-line caching with smart invalidation for performance
+  - Automatic language detection based on file extension
+  - `C-x s` - Toggle syntax highlighting on/off
+  - Configurable via `syntax-highlighting = true/false` in config file
+  - Syntax colors merge properly with region (selection) highlighting
+
 - **Region Highlighting**
   - Selected text between mark and cursor is now visually highlighted
   - Uses reverse video styling for clear visibility
