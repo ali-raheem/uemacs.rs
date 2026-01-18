@@ -76,6 +76,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `C-x M-l` - Load macro from slot (load macro from slot 0-9)
   - `C-u <n> C-x e` - Execute macro from slot n (0-9)
 
+- **Persistent Macro Storage**
+  - `C-x M-S` - Save all macros to disk (`~/.uemacs-macros`)
+  - `C-x M-L` - Load macros from disk
+  - Macros are automatically loaded on startup
+  - Human-readable file format (one key per line)
+
 - **Additional File Operations**
   - `C-x C-w` - Write file (Save As - save buffer to a new filename)
   - `M-~` - Not modified (clear the modification flag)
@@ -151,6 +157,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Tests for emoji, Chinese characters, and boundary conditions
 
 ### Fixed
+- M-d (kill word) hanging on blank lines due to stale line index after join operations
+- M-Backspace (backward kill word) same fix for multi-line deletion
 - UTF-8 string slicing in `kill_word`, `backward_kill_word`, `copy_region`
 - Query replace multi-byte character insertion (was using char index as byte offset)
 - Transpose chars UTF-8 boundary detection

@@ -29,12 +29,13 @@ cargo build --release
 - **Search** - Incremental search, query-replace, replace-string, hunt repeat
 - **Buffers** - Multiple buffers, split windows, buffer cycling
 - **Files** - Open, save, Save As, insert file, read-only toggle
-- **Macros** - Record, playback, named macro slots (0-9)
+- **Macros** - Record, playback, named slots (0-9), persistent storage
 - **Case** - Upcase/downcase/capitalize word and region
 - **Shell** - Execute commands, filter buffer through shell
 - **Help** - Describe key, list all bindings
 - **Undo** - Full undo with operation grouping
 - **UTF-8** - Full Unicode text handling
+- **Region Highlighting** - Visual selection between mark and cursor
 - **Cross-platform** - Windows, Linux, macOS
 
 ## Usage
@@ -103,7 +104,8 @@ cargo run --release -- filename.txt
 |-----|--------|-----|--------|
 | C-x ( | Start recording | C-x ) | Stop recording |
 | C-x e | Execute macro | C-x M-s | Store to slot 0-9 |
-| C-x M-l | Load from slot | | |
+| C-x M-l | Load from slot | C-x M-S | Save macros to file |
+| C-x M-L | Load macros from file | | |
 
 ### Help
 | Key | Action |
@@ -114,6 +116,52 @@ cargo run --release -- filename.txt
 | C-x = | Cursor position info |
 
 **Note:** `C-` = Ctrl, `M-` = Alt or ESC prefix, `C-x` = Ctrl-X prefix
+
+## Configuration
+
+uEmacs.rs reads configuration from `~/.uemacs.conf` (or `%USERPROFILE%\.uemacs.conf` on Windows):
+
+```ini
+# Display settings
+line-numbers = true
+
+# Auto-save (saves to #filename# periodically)
+auto-save = true
+auto-save-interval = 30
+
+# Tab width for display
+tab-width = 8
+
+# Warn before closing modified buffers
+warn-unsaved = true
+```
+
+## Persistent Macros
+
+Keyboard macros can be saved to disk and automatically loaded on startup.
+
+**File location:** `~/.uemacs-macros` (or `%USERPROFILE%\.uemacs-macros` on Windows)
+
+**Workflow:**
+1. Record a macro with `C-x (` ... `C-x )`
+2. Store it to a slot (0-9) with `C-x M-s`
+3. Save all slots to disk with `C-x M-S`
+4. Macros are automatically loaded when uEmacs starts
+
+**File format:** Human-readable text, one key per line:
+```ini
+# uEmacs.rs keyboard macros
+
+[macro.0]
+C-a
+C-k
+C-n
+C-y
+
+[macro.3]
+M-f
+M-d
+```
 
 ## License
 

@@ -516,6 +516,11 @@ pub fn kill_word(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandSt
         let end_line = editor.current_window().cursor_line();
         let end_col = editor.current_window().cursor_col();
 
+        // No word found (at end of buffer or no words after cursor)
+        if start_line == end_line && start_col == end_col {
+            return Ok(CommandStatus::Success);
+        }
+
         editor.current_window_mut().set_cursor(start_line, start_col);
 
         if start_line == end_line {
@@ -532,9 +537,13 @@ pub fn kill_word(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandSt
             }
             editor.current_buffer_mut().set_modified(true);
         } else {
-            while editor.current_window().cursor_line() < end_line
-                || (editor.current_window().cursor_line() == end_line
-                    && editor.current_window().cursor_col() < end_col)
+            // Multi-line case: track end position which shifts as we join lines
+            let mut target_line = end_line;
+            let mut target_col = end_col;
+
+            while editor.current_window().cursor_line() < target_line
+                || (editor.current_window().cursor_line() == target_line
+                    && editor.current_window().cursor_col() < target_col)
             {
                 let cur_line = editor.current_window().cursor_line();
                 let cur_col = editor.current_window().cursor_col();
@@ -551,6 +560,15 @@ pub fn kill_word(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandSt
                         editor.kill_append(&ch.to_string());
                     }
                 } else {
+                    // About to join with next line - update target position
+                    if target_line == cur_line + 1 {
+                        // Target is on the next line, after join it will be on current line
+                        target_line = cur_line;
+                        target_col = line_len + target_col;
+                    } else if target_line > cur_line {
+                        // Target is further down, just decrement line number
+                        target_line -= 1;
+                    }
                     editor.current_buffer_mut().join_line(cur_line);
                     editor.kill_append("\n");
                 }
@@ -579,6 +597,11 @@ pub fn backward_kill_word(editor: &mut EditorState, _f: bool, n: i32) -> Result<
         let start_line = editor.current_window().cursor_line();
         let start_col = editor.current_window().cursor_col();
 
+        // No word found (at beginning of buffer or no words before cursor)
+        if start_line == end_line && start_col == end_col {
+            return Ok(CommandStatus::Success);
+        }
+
         if start_line == end_line {
             if let Some(line) = editor.current_buffer().line(start_line) {
                 let killed = line.safe_slice(start_col, end_col).to_string();
@@ -593,10 +616,14 @@ pub fn backward_kill_word(editor: &mut EditorState, _f: bool, n: i32) -> Result<
             }
             editor.current_buffer_mut().set_modified(true);
         } else {
+            // Multi-line case: track end position which shifts as we join lines
+            let mut target_line = end_line;
+            let mut target_col = end_col;
             let mut deleted = String::new();
-            while editor.current_window().cursor_line() < end_line
-                || (editor.current_window().cursor_line() == end_line
-                    && editor.current_window().cursor_col() < end_col)
+
+            while editor.current_window().cursor_line() < target_line
+                || (editor.current_window().cursor_line() == target_line
+                    && editor.current_window().cursor_col() < target_col)
             {
                 let cur_line = editor.current_window().cursor_line();
                 let cur_col = editor.current_window().cursor_col();
@@ -613,6 +640,13 @@ pub fn backward_kill_word(editor: &mut EditorState, _f: bool, n: i32) -> Result<
                         deleted.push(ch);
                     }
                 } else {
+                    // About to join with next line - update target position
+                    if target_line == cur_line + 1 {
+                        target_line = cur_line;
+                        target_col = line_len + target_col;
+                    } else if target_line > cur_line {
+                        target_line -= 1;
+                    }
                     editor.current_buffer_mut().join_line(cur_line);
                     deleted.push('\n');
                 }

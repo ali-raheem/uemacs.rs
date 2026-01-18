@@ -2,6 +2,7 @@
 
 use crate::editor::EditorState;
 use crate::error::Result;
+use crate::macro_store;
 use super::CommandStatus;
 
 /// Start recording a keyboard macro (C-x ()
@@ -106,4 +107,49 @@ pub fn undo(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus
         editor.display.set_message("Nothing to undo");
         Ok(CommandStatus::Failure)
     }
+}
+
+/// Save all macros to disk (C-x M-S)
+pub fn save_macros_to_file(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+    match macro_store::save_macros(&editor.macro_state.slots) {
+        Ok(()) => {
+            let count = macro_store::count_stored_macros(&editor.macro_state.slots);
+            let path = macro_store::macros_file_path()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            editor.display.set_message(&format!(
+                "Saved {} macro(s) to {}",
+                count, path
+            ));
+            Ok(CommandStatus::Success)
+        }
+        Err(e) => {
+            editor.display.set_message(&format!("Error saving macros: {}", e));
+            Ok(CommandStatus::Failure)
+        }
+    }
+}
+
+/// Load macros from disk (C-x M-L)
+pub fn load_macros_from_file(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+    let slots = macro_store::load_macros();
+    let count = macro_store::count_stored_macros(&slots);
+
+    if count == 0 {
+        let path = macro_store::macros_file_path()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        editor.display.set_message(&format!("No macros found in {}", path));
+        return Ok(CommandStatus::Success);
+    }
+
+    editor.macro_state.slots = slots;
+    let path = macro_store::macros_file_path()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    editor.display.set_message(&format!(
+        "Loaded {} macro(s) from {}",
+        count, path
+    ));
+    Ok(CommandStatus::Success)
 }

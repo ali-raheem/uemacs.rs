@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use crate::editor::EditorState;
 use crate::error::Result;
-use crate::input::Key;
+use crate::input::{Key, key_flags};
 
 /// Command result status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -261,6 +261,9 @@ impl KeyTable {
         self.bind_named(Key::ctlx('e'), execute_macro, "kmacro-end-and-call-macro");
         self.bind_named(Key::ctlx_meta('s'), store_macro, "store-kbd-macro");
         self.bind_named(Key::ctlx_meta('l'), load_macro, "load-kbd-macro");
+        // Use M-S-s and M-S-l (uppercase) for file operations
+        self.bind_named(Key(key_flags::CTLX | key_flags::META | 'S' as u32), save_macros_to_file, "save-macros-to-file");
+        self.bind_named(Key(key_flags::CTLX | key_flags::META | 'L' as u32), load_macros_from_file, "load-macros-from-file");
 
         // Case operations
         self.bind_named(Key::meta('u'), upcase_word, "upcase-word");

@@ -258,8 +258,20 @@ impl EditorState {
         // Warning settings
         self.warn_unsaved = config.warn_unsaved;
 
+        // Load saved macros from disk
+        self.load_macros_on_startup();
+
         // Tab width is stored in Line, but we don't have a global tab width setting yet
         // This could be added in the future
+    }
+
+    /// Load macros from the macros file at startup
+    fn load_macros_on_startup(&mut self) {
+        let slots = crate::macro_store::load_macros();
+        let count = crate::macro_store::count_stored_macros(&slots);
+        if count > 0 {
+            self.macro_state.slots = slots;
+        }
     }
 
     /// Open a file in a new buffer

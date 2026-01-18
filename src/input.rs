@@ -157,6 +157,84 @@ impl Key {
 
         result
     }
+
+    /// Parse a key from its display name (e.g., "C-f", "M-x", "C-x C-s")
+    /// Returns None if the string cannot be parsed
+    pub fn from_display_name(s: &str) -> Option<Self> {
+        let s = s.trim();
+        if s.is_empty() {
+            return None;
+        }
+
+        let mut flags: u32 = 0;
+        let mut remaining = s;
+
+        // Check for C-x prefix
+        if remaining.starts_with("C-x ") {
+            flags |= key_flags::CTLX;
+            remaining = &remaining[4..];
+        }
+
+        // Check for M- prefix
+        if remaining.starts_with("M-") {
+            flags |= key_flags::META;
+            remaining = &remaining[2..];
+        }
+
+        // Check for C- prefix (after potential M-)
+        if remaining.starts_with("C-") {
+            flags |= key_flags::CONTROL;
+            remaining = &remaining[2..];
+        }
+
+        // Parse special keys
+        let code: u32 = match remaining {
+            "Home" => return Some(Key(flags | key_flags::SPEC | 0x47)),
+            "Up" => return Some(Key(flags | key_flags::SPEC | 0x48)),
+            "PageUp" => return Some(Key(flags | key_flags::SPEC | 0x49)),
+            "Left" => return Some(Key(flags | key_flags::SPEC | 0x4b)),
+            "Right" => return Some(Key(flags | key_flags::SPEC | 0x4d)),
+            "End" => return Some(Key(flags | key_flags::SPEC | 0x4f)),
+            "Down" => return Some(Key(flags | key_flags::SPEC | 0x50)),
+            "PageDown" => return Some(Key(flags | key_flags::SPEC | 0x51)),
+            "Delete" => return Some(Key(flags | key_flags::SPEC | 0x53)),
+            "Backspace" => 0x7f,
+            "SPC" => 0x20,
+            "TAB" | "Tab" => return Some(Key(flags | key_flags::CONTROL | ('i' as u32))),
+            "RET" | "Return" | "Enter" => return Some(Key(flags | key_flags::CONTROL | ('m' as u32))),
+            "ESC" | "Escape" => return Some(Key(flags | key_flags::CONTROL | ('[' as u32))),
+            s if s.starts_with("F") => {
+                // Function key F1-F10
+                if let Ok(n) = s[1..].parse::<u32>() {
+                    if n >= 1 && n <= 10 {
+                        return Some(Key(flags | key_flags::SPEC | (0x3a + n)));
+                    }
+                }
+                return None;
+            }
+            s if s.starts_with("special-0x") => {
+                // Parse hex special key code
+                if let Ok(code) = u32::from_str_radix(&s[10..], 16) {
+                    return Some(Key(flags | key_flags::SPEC | code));
+                }
+                return None;
+            }
+            s if s.starts_with("0x") => {
+                // Parse hex character code
+                if let Ok(code) = u32::from_str_radix(&s[2..], 16) {
+                    return Some(Key(flags | code));
+                }
+                return None;
+            }
+            s if s.chars().count() == 1 => {
+                // Single character
+                s.chars().next().unwrap() as u32
+            }
+            _ => return None,
+        };
+
+        Some(Key(flags | code))
+    }
 }
 
 /// Input state for handling multi-key sequences
@@ -341,5 +419,61 @@ impl InputState {
 impl Default for InputState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_key_display_roundtrip() {
+        // Test simple characters
+        let key = Key::char('a');
+        assert_eq!(Key::from_display_name(&key.display_name()), Some(key));
+
+        // Test control keys
+        let key = Key::ctrl('f');
+        assert_eq!(Key::from_display_name(&key.display_name()), Some(key));
+
+        // Test meta keys
+        let key = Key::meta('x');
+        assert_eq!(Key::from_display_name(&key.display_name()), Some(key));
+
+        // Test C-x keys
+        let key = Key::ctlx('s');
+        assert_eq!(Key::from_display_name(&key.display_name()), Some(key));
+
+        // Test C-x C- keys
+        let key = Key::ctlx_ctrl('s');
+        assert_eq!(Key::from_display_name(&key.display_name()), Some(key));
+
+        // Test special keys
+        let key = Key::special(0x48); // Up
+        assert_eq!(Key::from_display_name(&key.display_name()), Some(key));
+    }
+
+    #[test]
+    fn test_key_parse_special() {
+        assert_eq!(Key::from_display_name("Home"), Some(Key::special(0x47)));
+        assert_eq!(Key::from_display_name("Up"), Some(Key::special(0x48)));
+        assert_eq!(Key::from_display_name("Down"), Some(Key::special(0x50)));
+        assert_eq!(Key::from_display_name("F1"), Some(Key::special(0x3b)));
+        assert_eq!(Key::from_display_name("F10"), Some(Key::special(0x44)));
+    }
+
+    #[test]
+    fn test_key_parse_modifiers() {
+        assert_eq!(Key::from_display_name("C-f"), Some(Key::ctrl('f')));
+        assert_eq!(Key::from_display_name("M-x"), Some(Key::meta('x')));
+        assert_eq!(Key::from_display_name("C-x s"), Some(Key::ctlx('s')));
+        assert_eq!(Key::from_display_name("C-x C-s"), Some(Key::ctlx_ctrl('s')));
+        assert_eq!(Key::from_display_name("C-x M-s"), Some(Key::ctlx_meta('s')));
+    }
+
+    #[test]
+    fn test_key_parse_special_chars() {
+        assert_eq!(Key::from_display_name("SPC"), Some(Key::char(' ')));
+        assert_eq!(Key::from_display_name("Backspace"), Some(Key(0x7f)));
     }
 }
