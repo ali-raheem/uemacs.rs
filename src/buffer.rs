@@ -54,6 +54,8 @@ pub struct Buffer {
     filename: Option<PathBuf>,
     /// Whether buffer has unsaved changes
     modified: bool,
+    /// Whether the buffer should serialize with a trailing newline.
+    trailing_newline: bool,
     /// Buffer modes
     modes: BufferModes,
     /// Undo stack
@@ -70,6 +72,7 @@ impl Buffer {
             name: name.into(),
             filename: None,
             modified: false,
+            trailing_newline: false,
             modes: BufferModes::default(),
             undo_stack: Vec::new(),
             recording_undo: true,
@@ -95,6 +98,7 @@ impl Buffer {
             name: name.into(),
             filename: None,
             modified: false,
+            trailing_newline: content.ends_with('\n'),
             modes: BufferModes::default(),
             undo_stack: Vec::new(),
             recording_undo: false, // Don't record undo for generated buffers
@@ -114,6 +118,7 @@ impl Buffer {
         }
 
         self.modified = false;
+        self.trailing_newline = content.ends_with('\n');
         self.undo_stack.clear();
     }
 
@@ -143,6 +148,7 @@ impl Buffer {
             name,
             filename: Some(path.clone()),
             modified: false,
+            trailing_newline: content.ends_with('\n'),
             modes: BufferModes::default(),
             undo_stack: Vec::new(),
             recording_undo: true,
@@ -394,7 +400,8 @@ impl Buffer {
         let mut file = std::fs::File::create(path)?;
         for (i, line) in self.lines.iter().enumerate() {
             write!(file, "{}", line.text())?;
-            if i < self.lines.len() - 1 {
+            let is_last = i == self.lines.len() - 1;
+            if !is_last || self.trailing_newline {
                 writeln!(file)?;
             }
         }
@@ -499,6 +506,8 @@ impl Default for Buffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn test_undo_reinsert_utf8_deleted_text() {
@@ -513,5 +522,37 @@ mod tests {
         let cursor = buffer.undo();
         assert_eq!(cursor, Some((0, 3)));
         assert_eq!(buffer.line(0).map(|l| l.text()), Some("aé"));
+    }
+
+    #[test]
+    fn test_write_preserves_trailing_newline() {
+        let buffer = Buffer::from_content("test", "alpha\nbeta\n");
+        let path = unique_temp_path("buffer-trailing-nl");
+
+        buffer.write_to(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(written, "alpha\nbeta\n");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_write_without_trailing_newline() {
+        let buffer = Buffer::from_content("test", "alpha\nbeta");
+        let path = unique_temp_path("buffer-no-trailing-nl");
+
+        buffer.write_to(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(written, "alpha\nbeta");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    fn unique_temp_path(prefix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{}-{}-{}.txt", prefix, std::process::id(), nanos))
     }
 }

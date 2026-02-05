@@ -2462,6 +2462,20 @@ impl EditorState {
         }
     }
 
+    fn format_filter_failure(
+        command: &str,
+        status: std::process::ExitStatus,
+        stderr: &[u8],
+    ) -> String {
+        let details = String::from_utf8_lossy(stderr);
+        let details = details.trim();
+        if details.is_empty() {
+            format!("Filter '{}' failed ({})", command, status)
+        } else {
+            format!("Filter '{}' failed ({}): {}", command, status, details)
+        }
+    }
+
     /// Filter buffer contents through a shell command
     pub fn filter_buffer(&mut self, command: &str) {
         use std::io::Write;
@@ -2506,6 +2520,16 @@ impl EditorState {
                 // Wait for output
                 match child.wait_with_output() {
                     Ok(output) => {
+                        if !output.status.success() {
+                            let msg = Self::format_filter_failure(
+                                command,
+                                output.status,
+                                &output.stderr,
+                            );
+                            self.display.set_message(msg);
+                            return;
+                        }
+
                         let new_content = String::from_utf8_lossy(&output.stdout);
 
                         // Replace buffer content
@@ -2594,6 +2618,16 @@ impl EditorState {
                 // Wait for output
                 match child.wait_with_output() {
                     Ok(output) => {
+                        if !output.status.success() {
+                            let msg = Self::format_filter_failure(
+                                command,
+                                output.status,
+                                &output.stderr,
+                            );
+                            self.display.set_message(msg);
+                            return;
+                        }
+
                         let output_text = String::from_utf8_lossy(&output.stdout);
 
                         if replace {
