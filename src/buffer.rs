@@ -447,9 +447,9 @@ impl Buffer {
                 UndoEntry::Delete { line, col, text } => {
                     // Text was deleted, so insert it back
                     if let Some(line_ref) = self.lines.get_mut(line) {
-                        let text_to_insert = text.clone();
-                        for (i, ch) in text_to_insert.chars().enumerate() {
-                            line_ref.insert_char(col + i, ch);
+                        // `col` is a byte offset; reinserting via insert_str preserves UTF-8 boundaries.
+                        if col <= line_ref.len() {
+                            line_ref.insert_str(col, &text);
                         }
                     }
                     cursor_pos = Some((line, col + text.len()));
@@ -493,5 +493,25 @@ impl Buffer {
 impl Default for Buffer {
     fn default() -> Self {
         Self::new("*scratch*")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_undo_reinsert_utf8_deleted_text() {
+        let mut buffer = Buffer::new("test");
+        buffer.set_content("aé");
+
+        // Delete the multibyte character at its byte offset.
+        let deleted = buffer.delete_char(0, 1);
+        assert_eq!(deleted, Some('é'));
+        assert_eq!(buffer.line(0).map(|l| l.text()), Some("a"));
+
+        let cursor = buffer.undo();
+        assert_eq!(cursor, Some((0, 3)));
+        assert_eq!(buffer.line(0).map(|l| l.text()), Some("aé"));
     }
 }

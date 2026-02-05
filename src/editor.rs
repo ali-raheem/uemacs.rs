@@ -616,6 +616,7 @@ impl EditorState {
         // Move cursor forward
         let new_col = cursor_col + ch.len_utf8();
         self.current_window_mut().set_cursor(cursor_line, new_col);
+        self.update_goal_col_from_cursor();
     }
 
     /// Invalidate syntax highlighting from a line onwards for the current buffer
@@ -644,6 +645,7 @@ impl EditorState {
             }
         }
 
+        self.update_goal_col_from_cursor();
         self.ensure_cursor_visible();
     }
 
@@ -673,6 +675,7 @@ impl EditorState {
                 .set_cursor(cursor_line - 1, prev_line_len);
         }
 
+        self.update_goal_col_from_cursor();
         self.ensure_cursor_visible();
     }
 
@@ -1374,6 +1377,18 @@ impl EditorState {
         self.current_window_mut().ensure_cursor_visible();
     }
 
+    /// Update goal column from the current cursor byte position.
+    fn update_goal_col_from_cursor(&mut self) {
+        let cursor_line = self.current_window().cursor_line();
+        let cursor_col = self.current_window().cursor_col();
+        let display_col = self
+            .current_buffer()
+            .line(cursor_line)
+            .map(|line| line.byte_to_col(cursor_col))
+            .unwrap_or(0);
+        self.current_window_mut().set_goal_col(display_col);
+    }
+
     /// Convert display column to byte offset in a line
     fn col_to_byte_in_line(&self, line_idx: usize, display_col: usize) -> usize {
         if let Some(line) = self.current_buffer().line(line_idx) {
@@ -1966,10 +1981,17 @@ impl EditorState {
 
         // Process each line
         for line_idx in 0..line_count {
+            let mut search_from = 0;
+
             loop {
                 // Find next occurrence in this line
                 let found = if let Some(line) = self.current_buffer().line(line_idx) {
-                    line.text().find(search)
+                    let text = line.text();
+                    if search_from >= text.len() {
+                        None
+                    } else {
+                        text[search_from..].find(search).map(|pos| search_from + pos)
+                    }
                 } else {
                     None
                 };
@@ -1986,6 +2008,8 @@ impl EditorState {
                         }
                     }
                     count += 1;
+                    // Continue searching after the replacement we just applied.
+                    search_from = col + replace.len();
                 } else {
                     break;
                 }
