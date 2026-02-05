@@ -1,7 +1,7 @@
 //! Rust language definition
 
 use crate::syntax::language::LanguageDefinition;
-use crate::syntax::rules::{PatternRule, MultilineRule};
+use crate::syntax::rules::{MultilineRule, PatternRule};
 use crate::syntax::tokens::TokenType;
 
 /// Create Rust language definition
@@ -15,13 +15,23 @@ pub fn rust_language() -> LanguageDefinition {
         lang.add_multiline(rule);
     }
 
-    // Raw strings r#"..."# (simplified - doesn't handle all cases)
-    if let Some(rule) = MultilineRule::new("raw_string", r##"r#""##, r##""#"##, TokenType::String, 2) {
-        lang.add_multiline(rule);
+    // Raw strings: r"...", r#"..."#, r##"..."##, ... (limited hash depth)
+    for hashes in 0..=5 {
+        let marker = "#".repeat(hashes);
+        let start = regex::escape(&format!("r{}\"", marker));
+        let end = regex::escape(&format!("\"{}", marker));
+        let name = format!("raw_string_{}", hashes);
+        if let Some(rule) =
+            MultilineRule::new(&name, &start, &end, TokenType::String, 2 + hashes as u8)
+        {
+            lang.add_multiline(rule);
+        }
     }
 
     // Regular strings (with escape support)
-    if let Some(rule) = MultilineRule::with_escape("string", "\"", "\"", TokenType::String, 3, '\\') {
+    if let Some(rule) =
+        MultilineRule::with_escape("string", "\"", "\"", TokenType::String, 20, '\\')
+    {
         lang.add_multiline(rule);
     }
 
@@ -38,10 +48,17 @@ pub fn rust_language() -> LanguageDefinition {
     }
 
     // Attributes
-    if let Some(rule) = PatternRule::new("attribute", r"#!\?\[[\w:(),\s]*\]", TokenType::Attribute, 95) {
+    if let Some(rule) = PatternRule::new(
+        "attribute",
+        r"#!\?\[[\w:(),\s]*\]",
+        TokenType::Attribute,
+        95,
+    ) {
         lang.add_pattern(rule);
     }
-    if let Some(rule) = PatternRule::new("attribute_simple", r"#\[[\w]+\]", TokenType::Attribute, 94) {
+    if let Some(rule) =
+        PatternRule::new("attribute_simple", r"#\[[\w]+\]", TokenType::Attribute, 94)
+    {
         lang.add_pattern(rule);
     }
 
@@ -73,7 +90,9 @@ pub fn rust_language() -> LanguageDefinition {
     }
 
     // Type names (capitalized identifiers)
-    if let Some(rule) = PatternRule::new("type_name", r"\b[A-Z][a-zA-Z0-9_]*\b", TokenType::Type, 60) {
+    if let Some(rule) =
+        PatternRule::new("type_name", r"\b[A-Z][a-zA-Z0-9_]*\b", TokenType::Type, 60)
+    {
         lang.add_pattern(rule);
     }
 
@@ -96,16 +115,27 @@ pub fn rust_language() -> LanguageDefinition {
         lang.add_pattern(rule);
     }
     // Float
-    if let Some(rule) = PatternRule::new("float", r"\b\d[\d_]*\.\d[\d_]*(?:[eE][+-]?\d+)?\b", TokenType::Number, 64) {
+    if let Some(rule) = PatternRule::new(
+        "float",
+        r"\b\d[\d_]*\.\d[\d_]*(?:[eE][+-]?\d+)?\b",
+        TokenType::Number,
+        64,
+    ) {
         lang.add_pattern(rule);
     }
     // Integer
-    if let Some(rule) = PatternRule::new("integer", r"\b\d[\d_]*(?:u8|u16|u32|u64|u128|usize|i8|i16|i32|i64|i128|isize)?\b", TokenType::Number, 63) {
+    if let Some(rule) = PatternRule::new(
+        "integer",
+        r"\b\d[\d_]*(?:u8|u16|u32|u64|u128|usize|i8|i16|i32|i64|i128|isize)?\b",
+        TokenType::Number,
+        63,
+    ) {
         lang.add_pattern(rule);
     }
 
     // Operators
-    if let Some(rule) = PatternRule::new("operator", r"[+\-*/%&|^!<>=@]+", TokenType::Operator, 40) {
+    if let Some(rule) = PatternRule::new("operator", r"[+\-*/%&|^!<>=@]+", TokenType::Operator, 40)
+    {
         lang.add_pattern(rule);
     }
 
@@ -152,5 +182,18 @@ mod tests {
 
         // Should highlight println! as macro
         assert!(result.spans.iter().any(|s| s.start == 0));
+    }
+
+    #[test]
+    fn test_rust_raw_string_hashes() {
+        let lang = rust_language();
+        let source = r###"let s = r##"hello "quoted""##;"###;
+        let result = lang.highlight_line(source, LineState::default());
+
+        // Raw string should be highlighted as a single string span.
+        assert!(result
+            .spans
+            .iter()
+            .any(|span| span.start == "let s = ".len() && span.end > span.start));
     }
 }

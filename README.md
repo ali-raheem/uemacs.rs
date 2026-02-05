@@ -26,9 +26,10 @@ cargo build --release
 
 - **Navigation** - Character, word, line, page, buffer, paragraph movement
 - **Editing** - Kill/yank, transpose, fill paragraph, zap-to-char
-- **Search** - Incremental search, query-replace, replace-string, hunt repeat
+- **Search** - Incremental search, wrapped query-replace, replace-string, hunt repeat
 - **Buffers** - Multiple buffers, split windows, buffer cycling
 - **Files** - Open, save, Save As, insert file, read-only toggle
+- **Modes** - Exact/case-insensitive search, overwrite mode, wrap mode, C indentation mode
 - **Macros** - Record, playback, named slots (0-9), persistent storage
 - **Case** - Upcase/downcase/capitalize word and region
 - **Shell** - Execute commands, filter buffer through shell
@@ -122,6 +123,12 @@ cargo run --release -- filename.txt
 | C-x # | Toggle line numbers |
 | C-x s | Toggle syntax highlighting |
 
+### Modes
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| C-x M-e | Toggle exact search | C-x M-o | Toggle overwrite mode |
+| C-x M-w | Toggle wrap mode | C-x M-c | Toggle C mode |
+
 **Note:** `C-` = Ctrl, `M-` = Alt or ESC prefix, `C-x` = Ctrl-X prefix
 
 ## Configuration
@@ -137,7 +144,7 @@ syntax-highlighting = true
 auto-save = true
 auto-save-interval = 30
 
-# Tab width for display
+# Tab width for indentation/tab stops
 tab-width = 8
 
 # Warn before closing modified buffers
