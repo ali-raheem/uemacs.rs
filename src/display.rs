@@ -219,7 +219,7 @@ impl Display {
 
                 // Get syntax highlighting spans for this line
                 let text = line.text();
-                let syntax_spans = syntax.highlight_line(buf_idx, line_idx, text, line_count);
+                let syntax_spans = syntax.highlight_line(buf_idx, line_idx, buffer);
 
                 // Render line content with syntax and region highlighting
                 self.render_line_with_highlighting(

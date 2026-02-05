@@ -6,10 +6,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::buffer::Buffer;
+
+use super::builtin;
 use super::language::LanguageDefinition;
 use super::rules::LineState;
 use super::style::Span;
-use super::builtin;
 
 /// Per-buffer highlighting cache
 pub struct HighlightCache {
@@ -58,12 +60,19 @@ impl HighlightCache {
 
     /// Ensure cache vectors are large enough
     pub fn ensure_size(&mut self, line_count: usize) {
+        if self.line_states.len() > line_count {
+            self.line_states.truncate(line_count);
+        }
+        if self.line_spans.len() > line_count {
+            self.line_spans.truncate(line_count);
+        }
         if self.line_states.len() < line_count {
             self.line_states.resize(line_count, LineState::default());
         }
         if self.line_spans.len() < line_count {
             self.line_spans.resize(line_count, None);
         }
+        self.invalid_from = self.invalid_from.min(line_count);
     }
 }
 
@@ -150,7 +159,9 @@ impl SyntaxManager {
 
     /// Set language for a buffer based on filename
     pub fn set_buffer_language(&mut self, buffer_idx: usize, filename: Option<&Path>) {
-        let lang_name = filename.and_then(|f| self.detect_language(f)).map(|s| s.to_string());
+        let lang_name = filename
+            .and_then(|f| self.detect_language(f))
+            .map(|s| s.to_string());
         let cache = self.get_cache(buffer_idx);
         cache.set_language(lang_name);
     }
@@ -162,75 +173,64 @@ impl SyntaxManager {
         }
     }
 
-    /// Highlight a single line, using cache if available
+    /// Highlight a single line, recomputing cache state from the first invalid line.
     ///
     /// Returns spans for the line. Empty vec if no highlighting.
     pub fn highlight_line(
         &mut self,
         buffer_idx: usize,
         line_idx: usize,
-        text: &str,
-        line_count: usize,
+        buffer: &Buffer,
     ) -> Vec<Span> {
         if !self.enabled {
             return Vec::new();
         }
 
-        let cache = self.caches.entry(buffer_idx).or_default();
+        let line_count = buffer.line_count();
+        if line_idx >= line_count {
+            return Vec::new();
+        }
+
+        let (languages, caches) = (&self.languages, &mut self.caches);
+        let cache = caches.entry(buffer_idx).or_default();
         cache.ensure_size(line_count);
 
-        // Check if we have this language
         let lang_name = match &cache.language {
             Some(name) => name.clone(),
             None => return Vec::new(),
         };
 
-        let lang = match self.languages.get(&lang_name) {
+        let lang = match languages.get(&lang_name) {
             Some(lang) => lang,
             None => return Vec::new(),
         };
 
-        // Get previous line's state
-        let prev_state = if line_idx == 0 {
-            LineState::default()
-        } else {
-            // May need to compute previous lines first
-            self.ensure_states_up_to(buffer_idx, line_idx, line_count)
-        };
-
-        // Check cache
-        let cache = self.caches.get_mut(&buffer_idx).unwrap();
-        if let Some(spans) = cache.line_spans.get(line_idx).and_then(|s| s.as_ref()) {
-            return spans.to_vec();
-        }
-
-        // Compute highlighting
-        let lang = self.languages.get(&lang_name).unwrap();
-        let result = lang.highlight_line(text, prev_state);
-
-        // Store in cache
-        let cache = self.caches.get_mut(&buffer_idx).unwrap();
-        if line_idx < cache.line_states.len() {
-            cache.line_states[line_idx] = result.end_state;
-        }
-        if line_idx < cache.line_spans.len() {
-            cache.line_spans[line_idx] = Some(result.spans.clone());
-        }
-
-        result.spans
-    }
-
-    /// Ensure line states are computed up to (but not including) a line
-    fn ensure_states_up_to(&mut self, buffer_idx: usize, up_to: usize, line_count: usize) -> LineState {
-        // This is a simplified version - in practice we'd need the actual line text
-        // For now, just return the stored state or default
-        let cache = self.caches.get(&buffer_idx);
-        if let Some(cache) = cache {
-            if up_to > 0 && up_to <= cache.line_states.len() {
-                return cache.line_states[up_to - 1];
+        if cache.invalid_from > line_idx {
+            if let Some(spans) = cache.line_spans.get(line_idx).and_then(|s| s.as_ref()) {
+                return spans.clone();
             }
         }
-        LineState::default()
+
+        let start_line = cache.invalid_from.min(line_idx);
+        let mut prev_state = if start_line == 0 {
+            LineState::default()
+        } else {
+            cache.line_states[start_line - 1]
+        };
+
+        for current_line in start_line..=line_idx {
+            let text = buffer
+                .line(current_line)
+                .map(|line| line.text())
+                .unwrap_or("");
+            let result = lang.highlight_line(text, prev_state);
+            cache.line_states[current_line] = result.end_state;
+            cache.line_spans[current_line] = Some(result.spans);
+            prev_state = result.end_state;
+        }
+
+        cache.invalid_from = (line_idx + 1).min(line_count);
+        cache.line_spans[line_idx].clone().unwrap_or_default()
     }
 
     /// List available languages
@@ -255,16 +255,24 @@ impl Default for SyntaxManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn test_detect_language() {
         let manager = SyntaxManager::new();
 
         assert_eq!(manager.detect_language(Path::new("main.rs")), Some("Rust"));
-        assert_eq!(manager.detect_language(Path::new("test.py")), Some("Python"));
-        assert_eq!(manager.detect_language(Path::new("Cargo.toml")), Some("TOML"));
-        assert_eq!(manager.detect_language(Path::new("README.md")), Some("Markdown"));
+        assert_eq!(
+            manager.detect_language(Path::new("test.py")),
+            Some("Python")
+        );
+        assert_eq!(
+            manager.detect_language(Path::new("Cargo.toml")),
+            Some("TOML")
+        );
+        assert_eq!(
+            manager.detect_language(Path::new("README.md")),
+            Some("Markdown")
+        );
         assert_eq!(manager.detect_language(Path::new("main.c")), Some("C"));
         assert_eq!(manager.detect_language(Path::new("no_extension")), None);
     }
@@ -276,8 +284,10 @@ mod tests {
         // Set up a buffer with Rust language
         manager.set_buffer_language(0, Some(Path::new("test.rs")));
 
+        let buffer = Buffer::from_content("test.rs", "let x = 42;");
+
         // Highlight a simple line
-        let spans = manager.highlight_line(0, 0, "let x = 42;", 1);
+        let spans = manager.highlight_line(0, 0, &buffer);
 
         // Should have some spans
         assert!(!spans.is_empty());
@@ -287,23 +297,40 @@ mod tests {
     fn test_cache_invalidation() {
         let mut manager = SyntaxManager::new();
         manager.set_buffer_language(0, Some(Path::new("test.rs")));
+        let buffer = Buffer::from_content("test.rs", "let x = 1;\nlet y = 2;");
 
         // Highlight first line
-        let spans1 = manager.highlight_line(0, 0, "let x = 1;", 2);
+        let spans1 = manager.highlight_line(0, 0, &buffer);
         assert!(!spans1.is_empty());
 
         // Invalidate and re-highlight
         manager.invalidate_from(0, 0);
-        let spans2 = manager.highlight_line(0, 0, "let y = 2;", 2);
+        let spans2 = manager.highlight_line(0, 0, &buffer);
         assert!(!spans2.is_empty());
+    }
+
+    #[test]
+    fn test_multiline_state_propagates() {
+        let mut manager = SyntaxManager::new();
+        manager.set_buffer_language(0, Some(Path::new("test.rs")));
+        let buffer =
+            Buffer::from_content("test.rs", "/* block comment\nstill comment */ let x = 1;");
+
+        let line0 = manager.highlight_line(0, 0, &buffer);
+        assert!(!line0.is_empty());
+
+        let line1 = manager.highlight_line(0, 1, &buffer);
+        assert!(!line1.is_empty());
+        assert_eq!(line1[0].start, 0);
     }
 
     #[test]
     fn test_no_language() {
         let mut manager = SyntaxManager::new();
+        let buffer = Buffer::from_content("plain.txt", "some text");
 
         // No language set - should return empty spans
-        let spans = manager.highlight_line(0, 0, "some text", 1);
+        let spans = manager.highlight_line(0, 0, &buffer);
         assert!(spans.is_empty());
     }
 
