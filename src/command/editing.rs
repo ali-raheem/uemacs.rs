@@ -1,10 +1,10 @@
 //! Editing commands - text modification operations
 
+use super::navigation::{backward_word, forward_word};
+use super::CommandStatus;
 use crate::editor::EditorState;
 use crate::error::Result;
 use crate::line::Line;
-use super::CommandStatus;
-use super::navigation::{forward_word, backward_word};
 
 /// Delete character at cursor (forward)
 pub fn delete_char_forward(editor: &mut EditorState, f: bool, n: i32) -> Result<CommandStatus> {
@@ -29,7 +29,10 @@ pub fn delete_char_forward(editor: &mut EditorState, f: bool, n: i32) -> Result<
             .unwrap_or(0);
 
         if cursor_col < line_len {
-            if let Some(ch) = editor.current_buffer_mut().delete_char(cursor_line, cursor_col) {
+            if let Some(ch) = editor
+                .current_buffer_mut()
+                .delete_char(cursor_line, cursor_col)
+            {
                 if f {
                     editor.kill_append(&ch.to_string());
                 }
@@ -179,7 +182,9 @@ pub fn yank(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandStatus>
 /// Cycle through kill ring after yank (M-y)
 pub fn yank_pop(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
     if !editor.last_was_yank {
-        editor.display.set_message("Previous command was not a yank");
+        editor
+            .display
+            .set_message("Previous command was not a yank");
         return Ok(CommandStatus::Failure);
     }
 
@@ -221,7 +226,9 @@ pub fn yank_pop(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandSt
         }
     }
 
-    editor.current_window_mut().set_cursor(start_line, start_col);
+    editor
+        .current_window_mut()
+        .set_cursor(start_line, start_col);
 
     for ch in new_text.chars() {
         if ch == '\n' {
@@ -305,7 +312,7 @@ pub fn indent_newline(editor: &mut EditorState, _f: bool, n: i32) -> Result<Comm
         let cursor_line = editor.current_window().cursor_line();
         let cursor_col = editor.current_window().cursor_col();
 
-        let indent = editor
+        let mut indent = editor
             .current_buffer()
             .line(cursor_line)
             .map(|line| {
@@ -317,6 +324,21 @@ pub fn indent_newline(editor: &mut EditorState, _f: bool, n: i32) -> Result<Comm
                 indent_str
             })
             .unwrap_or_default();
+
+        if editor.current_buffer().modes().c_mode {
+            if let Some(line) = editor.current_buffer().line(cursor_line) {
+                let text = line.text();
+                let before_cursor = &text[..cursor_col.min(text.len())];
+                if before_cursor
+                    .chars()
+                    .rev()
+                    .find(|ch| !ch.is_whitespace())
+                    .is_some_and(|ch| ch == '{')
+                {
+                    indent.push_str(&" ".repeat(editor.tab_width()));
+                }
+            }
+        }
 
         editor
             .current_buffer_mut()
@@ -366,9 +388,9 @@ pub fn transpose_chars(editor: &mut EditorState, _f: bool, _n: i32) -> Result<Co
     let (idx1, idx2) = if cursor_col >= text.len() {
         (len - 2, len - 1)
     } else {
-        let cur_idx = chars.iter().position(|(pos, ch)| {
-            *pos <= cursor_col && cursor_col < *pos + ch.len_utf8()
-        });
+        let cur_idx = chars
+            .iter()
+            .position(|(pos, ch)| *pos <= cursor_col && cursor_col < *pos + ch.len_utf8());
         match cur_idx {
             Some(i) if i > 0 => (i - 1, i),
             Some(0) if len > 1 => (0, 1),
@@ -444,7 +466,11 @@ pub fn zap_to_char(editor: &mut EditorState, _f: bool, n: i32) -> Result<Command
             'outer: while search_line < line_count {
                 if let Some(line) = editor.current_buffer().line(search_line) {
                     let text = line.text();
-                    let start = if search_line == cursor_line { search_col } else { 0 };
+                    let start = if search_line == cursor_line {
+                        search_col
+                    } else {
+                        0
+                    };
 
                     for (pos, ch) in text[start..].char_indices() {
                         if ch == target {
@@ -453,13 +479,16 @@ pub fn zap_to_char(editor: &mut EditorState, _f: bool, n: i32) -> Result<Command
                             if search_line == cursor_line {
                                 let killed = text[cursor_col..end_col].to_string();
                                 editor.kill_append(&killed);
-                                if let Some(line_mut) = editor.current_buffer_mut().line_mut(cursor_line) {
+                                if let Some(line_mut) =
+                                    editor.current_buffer_mut().line_mut(cursor_line)
+                                {
                                     line_mut.delete_range(cursor_col, end_col);
                                 }
                                 editor.current_buffer_mut().set_modified(true);
                             } else {
                                 let mut killed = String::new();
-                                if let Some(start_line) = editor.current_buffer().line(cursor_line) {
+                                if let Some(start_line) = editor.current_buffer().line(cursor_line)
+                                {
                                     killed.push_str(&start_line.text()[cursor_col..]);
                                     killed.push('\n');
                                 }
@@ -472,14 +501,18 @@ pub fn zap_to_char(editor: &mut EditorState, _f: bool, n: i32) -> Result<Command
                                 killed.push_str(&text[..end_col]);
                                 editor.kill_append(&killed);
 
-                                if let Some(line_mut) = editor.current_buffer_mut().line_mut(cursor_line) {
+                                if let Some(line_mut) =
+                                    editor.current_buffer_mut().line_mut(cursor_line)
+                                {
                                     let len = line_mut.len();
                                     line_mut.delete_range(cursor_col, len);
                                 }
                                 for _ in (cursor_line + 1)..=search_line {
                                     editor.current_buffer_mut().join_line(cursor_line);
                                 }
-                                if let Some(line_mut) = editor.current_buffer_mut().line_mut(cursor_line) {
+                                if let Some(line_mut) =
+                                    editor.current_buffer_mut().line_mut(cursor_line)
+                                {
                                     line_mut.delete_range(cursor_col, cursor_col + end_col);
                                 }
                                 editor.current_buffer_mut().set_modified(true);
@@ -495,7 +528,9 @@ pub fn zap_to_char(editor: &mut EditorState, _f: bool, n: i32) -> Result<Command
             }
 
             if !found {
-                editor.display.set_message(&format!("'{}' not found", target));
+                editor
+                    .display
+                    .set_message(&format!("'{}' not found", target));
                 return Ok(CommandStatus::Failure);
             }
         } else {
@@ -518,7 +553,8 @@ pub fn zap_to_char(editor: &mut EditorState, _f: bool, n: i32) -> Result<Command
                     break;
                 }
                 search_line -= 1;
-                search_up_to = editor.current_buffer()
+                search_up_to = editor
+                    .current_buffer()
                     .line(search_line)
                     .map(|l| l.len())
                     .unwrap_or(0);
@@ -527,7 +563,9 @@ pub fn zap_to_char(editor: &mut EditorState, _f: bool, n: i32) -> Result<Command
             let (target_line, target_col) = match found_pos {
                 Some(pos) => pos,
                 None => {
-                    editor.display.set_message(&format!("'{}' not found", target));
+                    editor
+                        .display
+                        .set_message(&format!("'{}' not found", target));
                     return Ok(CommandStatus::Failure);
                 }
             };
@@ -542,8 +580,9 @@ pub fn zap_to_char(editor: &mut EditorState, _f: bool, n: i32) -> Result<Command
                 let cur_col = editor.current_window().cursor_col();
 
                 if cur_col > 0 {
-                    if let Some((ch, new_col)) =
-                        editor.current_buffer_mut().delete_backward(cur_line, cur_col)
+                    if let Some((ch, new_col)) = editor
+                        .current_buffer_mut()
+                        .delete_backward(cur_line, cur_col)
                     {
                         editor.current_window_mut().set_cursor(cur_line, new_col);
                         deleted.insert(0, ch);
@@ -551,8 +590,11 @@ pub fn zap_to_char(editor: &mut EditorState, _f: bool, n: i32) -> Result<Command
                         break;
                     }
                 } else if cur_line > 0 {
-                    if let Some(join_pos) = editor.current_buffer_mut().join_with_previous(cur_line) {
-                        editor.current_window_mut().set_cursor(cur_line - 1, join_pos);
+                    if let Some(join_pos) = editor.current_buffer_mut().join_with_previous(cur_line)
+                    {
+                        editor
+                            .current_window_mut()
+                            .set_cursor(cur_line - 1, join_pos);
                         deleted.insert(0, '\n');
                     } else {
                         break;
@@ -599,7 +641,9 @@ pub fn kill_word(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandSt
             return Ok(CommandStatus::Success);
         }
 
-        editor.current_window_mut().set_cursor(start_line, start_col);
+        editor
+            .current_window_mut()
+            .set_cursor(start_line, start_col);
 
         if start_line == end_line {
             if let Some(line) = editor.current_buffer().line(start_line) {
@@ -632,9 +676,7 @@ pub fn kill_word(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandSt
                     .unwrap_or(0);
 
                 if cur_col < line_len {
-                    if let Some(ch) =
-                        editor.current_buffer_mut().delete_char(cur_line, cur_col)
-                    {
+                    if let Some(ch) = editor.current_buffer_mut().delete_char(cur_line, cur_col) {
                         editor.kill_append(&ch.to_string());
                     }
                 } else {
@@ -712,9 +754,7 @@ pub fn backward_kill_word(editor: &mut EditorState, _f: bool, n: i32) -> Result<
                     .unwrap_or(0);
 
                 if cur_col < line_len {
-                    if let Some(ch) =
-                        editor.current_buffer_mut().delete_char(cur_line, cur_col)
-                    {
+                    if let Some(ch) = editor.current_buffer_mut().delete_char(cur_line, cur_col) {
                         deleted.push(ch);
                     }
                 } else {
@@ -764,7 +804,12 @@ pub fn transpose_words(editor: &mut EditorState, _f: bool, n: i32) -> Result<Com
             .unwrap_or(chars.len());
 
         let mut word1_end = cur_char_idx;
-        while word1_end > 0 && chars.get(word1_end.saturating_sub(1)).map(|(_, c)| c.is_whitespace()).unwrap_or(true) {
+        while word1_end > 0
+            && chars
+                .get(word1_end.saturating_sub(1))
+                .map(|(_, c)| c.is_whitespace())
+                .unwrap_or(true)
+        {
             word1_end = word1_end.saturating_sub(1);
         }
         if word1_end == 0 && chars.get(0).map(|(_, c)| c.is_whitespace()).unwrap_or(true) {
@@ -772,12 +817,22 @@ pub fn transpose_words(editor: &mut EditorState, _f: bool, n: i32) -> Result<Com
         }
 
         let mut word1_start = word1_end;
-        while word1_start > 0 && !chars.get(word1_start.saturating_sub(1)).map(|(_, c)| c.is_whitespace()).unwrap_or(true) {
+        while word1_start > 0
+            && !chars
+                .get(word1_start.saturating_sub(1))
+                .map(|(_, c)| c.is_whitespace())
+                .unwrap_or(true)
+        {
             word1_start = word1_start.saturating_sub(1);
         }
 
         let mut word2_start = word1_end;
-        while word2_start < chars.len() && chars.get(word2_start).map(|(_, c)| c.is_whitespace()).unwrap_or(false) {
+        while word2_start < chars.len()
+            && chars
+                .get(word2_start)
+                .map(|(_, c)| c.is_whitespace())
+                .unwrap_or(false)
+        {
             word2_start += 1;
         }
         if word2_start >= chars.len() {
@@ -785,14 +840,27 @@ pub fn transpose_words(editor: &mut EditorState, _f: bool, n: i32) -> Result<Com
         }
 
         let mut word2_end = word2_start;
-        while word2_end < chars.len() && !chars.get(word2_end).map(|(_, c)| c.is_whitespace()).unwrap_or(true) {
+        while word2_end < chars.len()
+            && !chars
+                .get(word2_end)
+                .map(|(_, c)| c.is_whitespace())
+                .unwrap_or(true)
+        {
             word2_end += 1;
         }
 
         let byte_word1_start = chars[word1_start].0;
-        let byte_word1_end = if word1_end < chars.len() { chars[word1_end].0 } else { text.len() };
+        let byte_word1_end = if word1_end < chars.len() {
+            chars[word1_end].0
+        } else {
+            text.len()
+        };
         let byte_word2_start = chars[word2_start].0;
-        let byte_word2_end = if word2_end < chars.len() { chars[word2_end].0 } else { text.len() };
+        let byte_word2_end = if word2_end < chars.len() {
+            chars[word2_end].0
+        } else {
+            text.len()
+        };
 
         let word1 = &text[byte_word1_start..byte_word1_end];
         let between = &text[byte_word1_end..byte_word2_start];
@@ -811,7 +879,9 @@ pub fn transpose_words(editor: &mut EditorState, _f: bool, n: i32) -> Result<Com
         editor.current_buffer_mut().set_modified(true);
 
         let new_cursor = byte_word1_start + word2.len() + between.len() + word1.len();
-        editor.current_window_mut().set_cursor(cursor_line, new_cursor);
+        editor
+            .current_window_mut()
+            .set_cursor(cursor_line, new_cursor);
     }
 
     Ok(CommandStatus::Success)
@@ -880,7 +950,9 @@ pub fn copy_line(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandSt
         editor.start_kill();
         editor.kill_append(&copied);
         let actual_count = count.min(line_count - cursor_line);
-        editor.display.set_message(&format!("Copied {} line(s)", actual_count));
+        editor
+            .display
+            .set_message(&format!("Copied {} line(s)", actual_count));
     }
 
     Ok(CommandStatus::Success)
@@ -906,8 +978,12 @@ pub fn duplicate_line(editor: &mut EditorState, _f: bool, n: i32) -> Result<Comm
     }
 
     editor.current_buffer_mut().set_modified(true);
-    editor.current_window_mut().set_cursor(cursor_line + 1, cursor_col);
-    editor.display.set_message(&format!("Duplicated {} time(s)", count));
+    editor
+        .current_window_mut()
+        .set_cursor(cursor_line + 1, cursor_col);
+    editor
+        .display
+        .set_message(&format!("Duplicated {} time(s)", count));
 
     Ok(CommandStatus::Success)
 }
@@ -918,8 +994,12 @@ pub fn split_line(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandS
         let cursor_line = editor.current_window().cursor_line();
         let cursor_col = editor.current_window().cursor_col();
 
-        editor.current_buffer_mut().insert_newline(cursor_line, cursor_col);
-        editor.current_window_mut().set_cursor(cursor_line, cursor_col);
+        editor
+            .current_buffer_mut()
+            .insert_newline(cursor_line, cursor_col);
+        editor
+            .current_window_mut()
+            .set_cursor(cursor_line, cursor_col);
     }
 
     Ok(CommandStatus::Success)
@@ -960,7 +1040,9 @@ pub fn join_line(editor: &mut EditorState, _f: bool, n: i32) -> Result<CommandSt
 
         editor.current_buffer_mut().delete_line(cursor_line);
         editor.current_buffer_mut().set_modified(true);
-        editor.current_window_mut().set_cursor(cursor_line - 1, prev_line_len);
+        editor
+            .current_window_mut()
+            .set_cursor(cursor_line - 1, prev_line_len);
     }
 
     Ok(CommandStatus::Success)

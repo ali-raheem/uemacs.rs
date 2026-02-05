@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use regex::RegexBuilder;
+use unicode_width::UnicodeWidthChar;
 
 use crate::buffer::Buffer;
 use crate::command::{CommandStatus, KeyTable};
@@ -64,6 +65,8 @@ pub struct EditorState {
     pub auto_save_enabled: bool,
     /// Whether to warn before closing unsaved buffers
     pub warn_unsaved: bool,
+    /// Tab width used by indentation commands
+    pub tab_width: usize,
     /// Pending quit (waiting for confirmation after unsaved warning)
     pub pending_quit: bool,
     /// Syntax highlighting manager
@@ -86,7 +89,7 @@ pub struct PrefixArg {
 pub enum PromptAction {
     None,
     FindFile,
-    InsertFile,           // Insert file contents at cursor
+    InsertFile, // Insert file contents at cursor
     SwitchBuffer,
     KillBuffer,
     GotoLine,
@@ -250,6 +253,7 @@ impl EditorState {
             auto_save_interval: Duration::from_secs(30),
             auto_save_enabled: true,
             warn_unsaved: true,
+            tab_width: 8,
             pending_quit: false,
             syntax: SyntaxManager::new(),
         }
@@ -266,15 +270,13 @@ impl EditorState {
 
         // Warning settings
         self.warn_unsaved = config.warn_unsaved;
+        self.tab_width = config.tab_width.max(1);
 
         // Syntax highlighting settings
         self.syntax.enabled = config.syntax_highlighting;
 
         // Load saved macros from disk
         self.load_macros_on_startup();
-
-        // Tab width is stored in Line, but we don't have a global tab width setting yet
-        // This could be added in the future
     }
 
     /// Load macros from the macros file at startup
@@ -293,7 +295,8 @@ impl EditorState {
         let buf_idx = self.buffers.len() - 1;
 
         // Set up syntax highlighting for this buffer
-        self.syntax.set_buffer_language(buf_idx, Some(path.as_path()));
+        self.syntax
+            .set_buffer_language(buf_idx, Some(path.as_path()));
 
         // Set current window to show the new buffer
         if let Some(window) = self.windows.get_mut(self.current_window) {
@@ -317,7 +320,8 @@ impl EditorState {
         let buf_idx = self.buffers.len() - 1;
 
         // Set up syntax highlighting for this buffer
-        self.syntax.set_buffer_language(buf_idx, Some(path.as_path()));
+        self.syntax
+            .set_buffer_language(buf_idx, Some(path.as_path()));
 
         // Set current window to show the new buffer
         if let Some(window) = self.windows.get_mut(self.current_window) {
@@ -367,7 +371,10 @@ impl EditorState {
 
             // Check for C-g (abort)
             if let crossterm::event::KeyCode::Char('g') = key_event.code {
-                if key_event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
+                if key_event
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL)
+                {
                     return Ok(None);
                 }
             }
@@ -500,9 +507,8 @@ impl EditorState {
                     let digit = ch.to_digit(10).unwrap() as i32;
                     if self.prefix_arg.active {
                         // Continue building the number
-                        self.prefix_arg.value = Some(
-                            self.prefix_arg.value.unwrap_or(0) * 10 + digit
-                        );
+                        self.prefix_arg.value =
+                            Some(self.prefix_arg.value.unwrap_or(0) * 10 + digit);
                     } else {
                         // Start prefix arg with this digit
                         self.prefix_arg.active = true;
@@ -532,9 +538,7 @@ impl EditorState {
             if let Some(ch) = key.base_char() {
                 if ch.is_ascii_digit() {
                     let digit = ch.to_digit(10).unwrap() as i32;
-                    self.prefix_arg.value = Some(
-                        self.prefix_arg.value.unwrap_or(0) * 10 + digit
-                    );
+                    self.prefix_arg.value = Some(self.prefix_arg.value.unwrap_or(0) * 10 + digit);
                     // Clear multiplier when explicit digits are entered
                     self.prefix_arg.multiplier = 1;
                     self.show_prefix_arg();
@@ -632,6 +636,21 @@ impl EditorState {
     pub fn insert_char(&mut self, ch: char) {
         let cursor_line = self.current_window().cursor_line();
         let cursor_col = self.current_window().cursor_col();
+        let overwrite = self.current_buffer().modes().overwrite;
+        let wrap = self.current_buffer().modes().wrap;
+
+        if overwrite {
+            let line_len = self
+                .current_buffer()
+                .line(cursor_line)
+                .map(|l| l.len())
+                .unwrap_or(0);
+            if cursor_col < line_len {
+                let _ = self
+                    .current_buffer_mut()
+                    .delete_char(cursor_line, cursor_col);
+            }
+        }
 
         self.current_buffer_mut()
             .insert_char(cursor_line, cursor_col, ch);
@@ -642,7 +661,88 @@ impl EditorState {
         // Move cursor forward
         let new_col = cursor_col + ch.len_utf8();
         self.current_window_mut().set_cursor(cursor_line, new_col);
+
+        if wrap {
+            self.wrap_line_if_needed(cursor_line);
+        }
+
         self.update_goal_col_from_cursor();
+    }
+
+    /// Hard-wrap a line at terminal width when wrap mode is enabled.
+    fn wrap_line_if_needed(&mut self, line_idx: usize) {
+        let wrap_col = (self.terminal.cols() as usize).saturating_sub(1).max(1);
+        let line = match self.current_buffer().line(line_idx) {
+            Some(line) => line,
+            None => return,
+        };
+        let text = line.text();
+
+        let mut display_col = 0;
+        let mut overflow_at = None;
+        for (byte_pos, ch) in text.char_indices() {
+            let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1);
+            if display_col + ch_width > wrap_col {
+                overflow_at = Some(byte_pos);
+                break;
+            }
+            display_col += ch_width;
+        }
+
+        let overflow_at = match overflow_at {
+            Some(pos) => pos,
+            None => return,
+        };
+
+        // Wrap only at whitespace boundaries to avoid splitting words.
+        let break_at = match text[..overflow_at]
+            .char_indices()
+            .rev()
+            .find(|(_, ch)| ch.is_whitespace())
+            .map(|(pos, _)| pos)
+        {
+            Some(pos) => pos,
+            None => return,
+        };
+
+        // Skip leading whitespace on the wrapped line.
+        let mut trim_start = break_at;
+        while trim_start < text.len() {
+            let ch = match text[trim_start..].chars().next() {
+                Some(ch) => ch,
+                None => break,
+            };
+            if ch.is_whitespace() {
+                trim_start += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+
+        let cursor_line = self.current_window().cursor_line();
+        let cursor_col = self.current_window().cursor_col();
+        self.current_buffer_mut().insert_newline(line_idx, break_at);
+
+        let trim_len = trim_start.saturating_sub(break_at);
+        if trim_len > 0 {
+            if let Some(line_mut) = self.current_buffer_mut().line_mut(line_idx + 1) {
+                line_mut.delete_range(0, trim_len.min(line_mut.len()));
+            }
+        }
+
+        if cursor_line == line_idx {
+            if cursor_col <= break_at {
+                self.current_window_mut().set_cursor(line_idx, cursor_col);
+            } else {
+                let new_col = cursor_col.saturating_sub(trim_start);
+                self.current_window_mut().set_cursor(line_idx + 1, new_col);
+            }
+        } else if cursor_line > line_idx {
+            self.current_window_mut()
+                .set_cursor(cursor_line + 1, cursor_col);
+        }
+
+        self.invalidate_syntax_from(line_idx);
     }
 
     /// Invalidate syntax highlighting from a line onwards for the current buffer
@@ -713,7 +813,8 @@ impl EditorState {
         if cursor_line + 1 < self.current_buffer().line_count() {
             // Move to next line, trying to maintain column
             let new_col = self.col_to_byte_in_line(cursor_line + 1, goal_col);
-            self.current_window_mut().set_cursor(cursor_line + 1, new_col);
+            self.current_window_mut()
+                .set_cursor(cursor_line + 1, new_col);
         }
 
         self.ensure_cursor_visible();
@@ -727,7 +828,8 @@ impl EditorState {
         if cursor_line > 0 {
             // Move to previous line, trying to maintain column
             let new_col = self.col_to_byte_in_line(cursor_line - 1, goal_col);
-            self.current_window_mut().set_cursor(cursor_line - 1, new_col);
+            self.current_window_mut()
+                .set_cursor(cursor_line - 1, new_col);
         }
 
         self.ensure_cursor_visible();
@@ -960,7 +1062,8 @@ impl EditorState {
         self.current_buffer_mut().set_modified(true);
         self.current_window_mut().set_cursor(para_start, 0);
         self.ensure_cursor_visible();
-        self.display.set_message(&format!("Filled paragraph ({} lines)", new_lines.len()));
+        self.display
+            .set_message(&format!("Filled paragraph ({} lines)", new_lines.len()));
     }
 
     /// Show the current prefix argument in the message line
@@ -1006,6 +1109,11 @@ impl EditorState {
             "Unsaved buffer warnings disabled"
         };
         self.display.set_message(status);
+    }
+
+    /// Get active tab width for indentation/tab-stop commands.
+    pub fn tab_width(&self) -> usize {
+        self.tab_width.max(1)
     }
 
     /// Force quit without checking for unsaved buffers
@@ -1161,7 +1269,9 @@ impl EditorState {
                 .case_insensitive(true)
                 .build()
                 .ok()?;
-            re.find_iter(&text[start..]).last().map(|m| start + m.start())
+            re.find_iter(&text[start..])
+                .last()
+                .map(|m| start + m.start())
         }
     }
 
@@ -1196,7 +1306,11 @@ impl EditorState {
                 for line_idx in start_line..line_count {
                     if let Some(line) = self.current_buffer().line(line_idx) {
                         let text = line.text();
-                        let col_start = if line_idx == start_line { search_start_col } else { 0 };
+                        let col_start = if line_idx == start_line {
+                            search_start_col
+                        } else {
+                            0
+                        };
                         if let Some(match_col) = self.find_from(text, col_start, &pattern) {
                             self.current_window_mut().set_cursor(line_idx, match_col);
                             self.ensure_cursor_visible();
@@ -1209,7 +1323,11 @@ impl EditorState {
                 for line_idx in 0..=start_line {
                     if let Some(line) = self.current_buffer().line(line_idx) {
                         let text = line.text();
-                        let col_end = if line_idx == start_line { start_col } else { text.len() };
+                        let col_end = if line_idx == start_line {
+                            start_col
+                        } else {
+                            text.len()
+                        };
                         if let Some(pos) = self.find_before(text, col_end, &pattern) {
                             self.current_window_mut().set_cursor(line_idx, pos);
                             self.ensure_cursor_visible();
@@ -1224,7 +1342,11 @@ impl EditorState {
                 for line_idx in (0..=start_line).rev() {
                     if let Some(line) = self.current_buffer().line(line_idx) {
                         let text = line.text();
-                        let col_end = if line_idx == start_line { start_col } else { text.len() };
+                        let col_end = if line_idx == start_line {
+                            start_col
+                        } else {
+                            text.len()
+                        };
                         if let Some(pos) = self.rfind_before(text, col_end, &pattern) {
                             self.current_window_mut().set_cursor(line_idx, pos);
                             self.ensure_cursor_visible();
@@ -1237,7 +1359,11 @@ impl EditorState {
                 for line_idx in (start_line..line_count).rev() {
                     if let Some(line) = self.current_buffer().line(line_idx) {
                         let text = line.text();
-                        let col_start = if line_idx == start_line { start_col + 1 } else { 0 };
+                        let col_start = if line_idx == start_line {
+                            start_col + 1
+                        } else {
+                            0
+                        };
                         if let Some(match_col) = self.rfind_from(text, col_start, &pattern) {
                             self.current_window_mut().set_cursor(line_idx, match_col);
                             self.ensure_cursor_visible();
@@ -1259,7 +1385,8 @@ impl EditorState {
             SearchDirection::Forward => "I-search: ",
             SearchDirection::Backward => "I-search backward: ",
         };
-        self.display.set_message(&format!("{}{}", dir_str, self.search.pattern));
+        self.display
+            .set_message(&format!("{}{}", dir_str, self.search.pattern));
     }
 
     /// Perform the search from current position
@@ -1285,7 +1412,9 @@ impl EditorState {
                             0
                         };
 
-                        if let Some(match_col) = self.find_from(text, search_start, &self.search.pattern) {
+                        if let Some(match_col) =
+                            self.find_from(text, search_start, &self.search.pattern)
+                        {
                             self.current_window_mut().set_cursor(line_idx, match_col);
                             self.search.last_match_line = Some(line_idx);
                             self.search.last_match_col = Some(match_col);
@@ -1298,16 +1427,27 @@ impl EditorState {
                 for line_idx in 0..=start_line {
                     if let Some(line) = self.current_buffer().line(line_idx) {
                         let text = line.text();
-                        let search_end = if line_idx == start_line { start_col } else { text.len() };
+                        let search_end = if line_idx == start_line {
+                            start_col
+                        } else {
+                            text.len()
+                        };
 
-                        if let Some(pos) = self.find_before(text, search_end, &self.search.pattern) {
+                        if let Some(pos) = self.find_before(text, search_end, &self.search.pattern)
+                        {
                             self.current_window_mut().set_cursor(line_idx, pos);
                             self.search.last_match_line = Some(line_idx);
                             self.search.last_match_col = Some(pos);
                             self.ensure_cursor_visible();
-                            self.display.set_message(&format!("Wrapped: {}{}",
-                                if self.search.direction == SearchDirection::Forward { "I-search: " } else { "I-search backward: " },
-                                self.search.pattern));
+                            self.display.set_message(&format!(
+                                "Wrapped: {}{}",
+                                if self.search.direction == SearchDirection::Forward {
+                                    "I-search: "
+                                } else {
+                                    "I-search backward: "
+                                },
+                                self.search.pattern
+                            ));
                             return true;
                         }
                     }
@@ -1324,7 +1464,8 @@ impl EditorState {
                             text.len()
                         };
 
-                        if let Some(pos) = self.rfind_before(text, search_end, &self.search.pattern) {
+                        if let Some(pos) = self.rfind_before(text, search_end, &self.search.pattern)
+                        {
                             self.current_window_mut().set_cursor(line_idx, pos);
                             self.search.last_match_line = Some(line_idx);
                             self.search.last_match_col = Some(pos);
@@ -1337,16 +1478,28 @@ impl EditorState {
                 for line_idx in (start_line..line_count).rev() {
                     if let Some(line) = self.current_buffer().line(line_idx) {
                         let text = line.text();
-                        let search_start = if line_idx == start_line { start_col + 1 } else { 0 };
+                        let search_start = if line_idx == start_line {
+                            start_col + 1
+                        } else {
+                            0
+                        };
 
-                        if let Some(match_col) = self.rfind_from(text, search_start, &self.search.pattern) {
+                        if let Some(match_col) =
+                            self.rfind_from(text, search_start, &self.search.pattern)
+                        {
                             self.current_window_mut().set_cursor(line_idx, match_col);
                             self.search.last_match_line = Some(line_idx);
                             self.search.last_match_col = Some(match_col);
                             self.ensure_cursor_visible();
-                            self.display.set_message(&format!("Wrapped: {}{}",
-                                if self.search.direction == SearchDirection::Forward { "I-search: " } else { "I-search backward: " },
-                                self.search.pattern));
+                            self.display.set_message(&format!(
+                                "Wrapped: {}{}",
+                                if self.search.direction == SearchDirection::Forward {
+                                    "I-search: "
+                                } else {
+                                    "I-search backward: "
+                                },
+                                self.search.pattern
+                            ));
                             return true;
                         }
                     }
@@ -1363,7 +1516,8 @@ impl EditorState {
             // Restore original position
             let origin_line = self.search.origin_line;
             let origin_col = self.search.origin_col;
-            self.current_window_mut().set_cursor(origin_line, origin_col);
+            self.current_window_mut()
+                .set_cursor(origin_line, origin_col);
         }
         self.search.active = false;
         self.display.clear_message();
@@ -1389,7 +1543,8 @@ impl EditorState {
             self.search.direction = SearchDirection::Forward;
             if !self.search.pattern.is_empty() {
                 if !self.do_search() {
-                    self.display.set_message(&format!("Failing I-search: {}", self.search.pattern));
+                    self.display
+                        .set_message(&format!("Failing I-search: {}", self.search.pattern));
                     let _ = self.terminal.beep();
                 } else {
                     self.update_search_prompt();
@@ -1405,7 +1560,10 @@ impl EditorState {
             self.search.direction = SearchDirection::Backward;
             if !self.search.pattern.is_empty() {
                 if !self.do_search() {
-                    self.display.set_message(&format!("Failing I-search backward: {}", self.search.pattern));
+                    self.display.set_message(&format!(
+                        "Failing I-search backward: {}",
+                        self.search.pattern
+                    ));
                     let _ = self.terminal.beep();
                 } else {
                     self.update_search_prompt();
@@ -1423,7 +1581,8 @@ impl EditorState {
                 // Re-search from origin
                 let origin_line = self.search.origin_line;
                 let origin_col = self.search.origin_col;
-                self.current_window_mut().set_cursor(origin_line, origin_col);
+                self.current_window_mut()
+                    .set_cursor(origin_line, origin_col);
                 if !self.search.pattern.is_empty() {
                     self.do_search();
                 }
@@ -1437,9 +1596,15 @@ impl EditorState {
             if let Some(ch) = key.base_char() {
                 self.search.pattern.push(ch);
                 if !self.do_search() {
-                    self.display.set_message(&format!("Failing {}: {}",
-                        if self.search.direction == SearchDirection::Forward { "I-search" } else { "I-search backward" },
-                        self.search.pattern));
+                    self.display.set_message(&format!(
+                        "Failing {}: {}",
+                        if self.search.direction == SearchDirection::Forward {
+                            "I-search"
+                        } else {
+                            "I-search backward"
+                        },
+                        self.search.pattern
+                    ));
                     let _ = self.terminal.beep();
                 } else {
                     self.update_search_prompt();
@@ -1583,7 +1748,8 @@ impl EditorState {
                     }
                     self.display.force_redraw();
                 } else {
-                    self.display.set_message(&format!("No buffer named {}", input));
+                    self.display
+                        .set_message(&format!("No buffer named {}", input));
                 }
             }
             PromptAction::KillBuffer => {
@@ -1600,7 +1766,8 @@ impl EditorState {
                     if self.warn_unsaved && self.buffers[idx].is_modified() {
                         // Prompt for confirmation
                         self.prompt.active = true;
-                        self.prompt.prompt = format!("Buffer {} modified; kill anyway? (y/n) ", input);
+                        self.prompt.prompt =
+                            format!("Buffer {} modified; kill anyway? (y/n) ", input);
                         self.prompt.input.clear();
                         self.prompt.action = PromptAction::ConfirmKillBuffer;
                         self.prompt.default = Some(input);
@@ -1610,7 +1777,8 @@ impl EditorState {
                     // Kill the buffer
                     self.force_kill_buffer(&input);
                 } else {
-                    self.display.set_message(&format!("No buffer named {}", input));
+                    self.display
+                        .set_message(&format!("No buffer named {}", input));
                 }
             }
             PromptAction::GotoLine => {
@@ -1664,8 +1832,10 @@ impl EditorState {
             }
             PromptAction::ReplaceStringReplace => {
                 // Perform all replacements without prompting
-                let count = self.replace_all_occurrences(&self.query_replace.search.clone(), &input);
-                self.display.set_message(&format!("Replaced {} occurrences", count));
+                let count =
+                    self.replace_all_occurrences(&self.query_replace.search.clone(), &input);
+                self.display
+                    .set_message(&format!("Replaced {} occurrences", count));
             }
             PromptAction::ShellCommand => {
                 if input.is_empty() {
@@ -1933,11 +2103,7 @@ impl EditorState {
         for line_idx in start_line..line_count {
             if let Some(line) = self.current_buffer().line(line_idx) {
                 let text = line.text();
-                let search_start = if line_idx == start_line {
-                    start_col
-                } else {
-                    0
-                };
+                let search_start = if line_idx == start_line { start_col } else { 0 };
 
                 if let Some(match_col) = self.find_from(text, search_start, &pattern) {
                     self.current_window_mut().set_cursor(line_idx, match_col);
@@ -1995,7 +2161,8 @@ impl EditorState {
         // No more matches.
         let count = self.query_replace.count;
         self.query_replace.active = false;
-        self.display.set_message(&format!("Replaced {} occurrences", count));
+        self.display
+            .set_message(&format!("Replaced {} occurrences", count));
         false
     }
 
@@ -2052,18 +2219,21 @@ impl EditorState {
                 // Quit
                 let count = self.query_replace.count;
                 self.query_replace.active = false;
-                self.display.set_message(&format!("Replaced {} occurrences", count));
+                self.display
+                    .set_message(&format!("Replaced {} occurrences", count));
             }
             Some('.') => {
                 // Replace this one and quit
                 self.query_replace_do_replace();
                 let count = self.query_replace.count;
                 self.query_replace.active = false;
-                self.display.set_message(&format!("Replaced {} occurrences", count));
+                self.display
+                    .set_message(&format!("Replaced {} occurrences", count));
             }
             Some('?') => {
                 // Show help
-                self.display.set_message("y:replace n:skip !:all q:quit .:replace+quit");
+                self.display
+                    .set_message("y:replace n:skip !:all q:quit .:replace+quit");
             }
             _ => {
                 // Check for C-g abort
@@ -2176,7 +2346,8 @@ impl EditorState {
         }
 
         self.display.force_redraw();
-        self.display.set_message("Type C-x b to return to previous buffer");
+        self.display
+            .set_message("Type C-x b to return to previous buffer");
     }
 
     /// Create or update the buffer list and switch to it
@@ -2247,14 +2418,10 @@ impl EditorState {
 
         // Determine shell based on platform
         #[cfg(windows)]
-        let output = Command::new("cmd")
-            .args(["/C", command])
-            .output();
+        let output = Command::new("cmd").args(["/C", command]).output();
 
         #[cfg(not(windows))]
-        let output = Command::new("sh")
-            .args(["-c", command])
-            .output();
+        let output = Command::new("sh").args(["-c", command]).output();
 
         let content = match output {
             Ok(output) => {
@@ -2296,13 +2463,13 @@ impl EditorState {
         }
 
         self.display.force_redraw();
-        self.display.set_message(&format!("Shell command: {}", command));
+        self.display
+            .set_message(&format!("Shell command: {}", command));
     }
 
     /// Execute a command by name (M-x)
     pub fn execute_named_command(&mut self, name: &str) {
-        if self.current_buffer().modes().view
-            && crate::command::is_read_only_blocked_command(name)
+        if self.current_buffer().modes().view && crate::command::is_read_only_blocked_command(name)
         {
             self.display.set_message("Buffer is read-only");
             return;
@@ -2322,14 +2489,16 @@ impl EditorState {
         } else {
             // Try to find partial matches for a helpful message
             let names = self.keytab.command_names();
-            let matches: Vec<&str> = names.iter()
+            let matches: Vec<&str> = names
+                .iter()
                 .filter(|n| n.contains(name))
                 .take(3)
                 .copied()
                 .collect();
 
             if matches.is_empty() {
-                self.display.set_message(&format!("Unknown command: {}", name));
+                self.display
+                    .set_message(&format!("Unknown command: {}", name));
             } else {
                 self.display.set_message(&format!(
                     "Unknown command: {}. Did you mean: {}?",
@@ -2343,7 +2512,8 @@ impl EditorState {
     /// Start recording a keyboard macro
     pub fn start_macro(&mut self) {
         if self.macro_state.playing {
-            self.display.set_message("Can't define macro while executing macro");
+            self.display
+                .set_message("Can't define macro while executing macro");
             return;
         }
         self.macro_state.recording = true;
@@ -2359,7 +2529,8 @@ impl EditorState {
         }
         self.macro_state.recording = false;
         let count = self.macro_state.keys.len();
-        self.display.set_message(&format!("Keyboard macro defined ({} keys)", count));
+        self.display
+            .set_message(&format!("Keyboard macro defined ({} keys)", count));
     }
 
     /// Execute the keyboard macro
@@ -2369,7 +2540,8 @@ impl EditorState {
             return Ok(());
         }
         if self.macro_state.recording {
-            self.display.set_message("Can't execute macro while defining it");
+            self.display
+                .set_message("Can't execute macro while defining it");
             return Ok(());
         }
         if self.macro_state.keys.is_empty() {
@@ -2404,7 +2576,8 @@ impl EditorState {
             return;
         }
         self.macro_state.slots[slot] = self.macro_state.keys.clone();
-        self.display.set_message(&format!("Macro saved to slot {}", slot));
+        self.display
+            .set_message(&format!("Macro saved to slot {}", slot));
     }
 
     /// Load macro from a numbered slot (0-9) into current macro
@@ -2414,12 +2587,16 @@ impl EditorState {
             return;
         }
         if self.macro_state.slots[slot].is_empty() {
-            self.display.set_message(&format!("No macro in slot {}", slot));
+            self.display
+                .set_message(&format!("No macro in slot {}", slot));
             return;
         }
         self.macro_state.keys = self.macro_state.slots[slot].clone();
         let key_count = self.macro_state.keys.len();
-        self.display.set_message(&format!("Loaded macro from slot {} ({} keys)", slot, key_count));
+        self.display.set_message(&format!(
+            "Loaded macro from slot {} ({} keys)",
+            slot, key_count
+        ));
     }
 
     /// Execute macro from a numbered slot (0-9)
@@ -2432,11 +2609,13 @@ impl EditorState {
             return Ok(());
         }
         if self.macro_state.recording {
-            self.display.set_message("Can't execute macro while defining it");
+            self.display
+                .set_message("Can't execute macro while defining it");
             return Ok(());
         }
         if self.macro_state.slots[slot].is_empty() {
-            self.display.set_message(&format!("No macro in slot {}", slot));
+            self.display
+                .set_message(&format!("No macro in slot {}", slot));
             return Ok(());
         }
 
@@ -2488,22 +2667,23 @@ impl EditorState {
                         // Delete auto-save file for new path too
                         self.delete_auto_save_file(&path);
                         // Update buffer name to match new filename
-                        let name = path.file_name()
+                        let name = path
+                            .file_name()
                             .map(|s| s.to_string_lossy().to_string())
                             .unwrap_or_else(|| filename.to_string());
                         self.current_buffer_mut().set_name(&name);
-                        self.display.set_message(&format!(
-                            "Wrote {} lines to {}",
-                            line_count, filename
-                        ));
+                        self.display
+                            .set_message(&format!("Wrote {} lines to {}", line_count, filename));
                     }
                     Err(e) => {
-                        self.display.set_message(&format!("Error writing file: {}", e));
+                        self.display
+                            .set_message(&format!("Error writing file: {}", e));
                     }
                 }
             }
             Err(e) => {
-                self.display.set_message(&format!("Cannot create {}: {}", filename, e));
+                self.display
+                    .set_message(&format!("Cannot create {}: {}", filename, e));
             }
         }
     }
@@ -2541,7 +2721,8 @@ impl EditorState {
                 ));
             }
             Err(e) => {
-                self.display.set_message(&format!("Error reading {}: {}", filename, e));
+                self.display
+                    .set_message(&format!("Error reading {}: {}", filename, e));
             }
         }
     }
@@ -2605,11 +2786,8 @@ impl EditorState {
                 match child.wait_with_output() {
                     Ok(output) => {
                         if !output.status.success() {
-                            let msg = Self::format_filter_failure(
-                                command,
-                                output.status,
-                                &output.stderr,
-                            );
+                            let msg =
+                                Self::format_filter_failure(command, output.status, &output.stderr);
                             self.display.set_message(msg);
                             return;
                         }
@@ -2624,10 +2802,8 @@ impl EditorState {
                         self.display.force_redraw();
 
                         let new_line_count = self.current_buffer().line_count();
-                        self.display.set_message(&format!(
-                            "Filter complete: {} lines",
-                            new_line_count
-                        ));
+                        self.display
+                            .set_message(&format!("Filter complete: {} lines", new_line_count));
                     }
                     Err(e) => {
                         self.display.set_message(&format!("Filter error: {}", e));
@@ -2635,7 +2811,8 @@ impl EditorState {
                 }
             }
             Err(e) => {
-                self.display.set_message(&format!("Failed to run command: {}", e));
+                self.display
+                    .set_message(&format!("Failed to run command: {}", e));
             }
         }
     }
@@ -2703,11 +2880,8 @@ impl EditorState {
                 match child.wait_with_output() {
                     Ok(output) => {
                         if !output.status.success() {
-                            let msg = Self::format_filter_failure(
-                                command,
-                                output.status,
-                                &output.stderr,
-                            );
+                            let msg =
+                                Self::format_filter_failure(command, output.status, &output.stderr);
                             self.display.set_message(msg);
                             return;
                         }
@@ -2725,8 +2899,10 @@ impl EditorState {
                             if start_line == end_line {
                                 // Same line - simple case
                                 if let Some(line) = self.current_buffer_mut().line_mut(start_line) {
-                                    let actual_start = line.text().len() - line.safe_slice_from(start_col).len();
-                                    let actual_end = actual_start + line.safe_slice(start_col, end_col).len();
+                                    let actual_start =
+                                        line.text().len() - line.safe_slice_from(start_col).len();
+                                    let actual_end =
+                                        actual_start + line.safe_slice(start_col, end_col).len();
                                     if actual_end > actual_start {
                                         line.delete_range(actual_start, actual_end);
                                     }
@@ -2736,7 +2912,8 @@ impl EditorState {
                                 // Delete from start_col to end of start_line
                                 if let Some(line) = self.current_buffer_mut().line_mut(start_line) {
                                     let line_len = line.len();
-                                    let actual_start = line.text().len() - line.safe_slice_from(start_col).len();
+                                    let actual_start =
+                                        line.text().len() - line.safe_slice_from(start_col).len();
                                     if actual_start < line_len {
                                         line.delete_range(actual_start, line_len);
                                     }
@@ -2751,11 +2928,16 @@ impl EditorState {
                                 if end_line > start_line {
                                     // The end line is now at start_line + 1 (after removing intermediates)
                                     let remaining_line_idx = start_line + 1;
-                                    if let Some(end_line_content) = self.current_buffer().line(remaining_line_idx) {
-                                        let remaining = end_line_content.safe_slice_from(end_col).to_string();
+                                    if let Some(end_line_content) =
+                                        self.current_buffer().line(remaining_line_idx)
+                                    {
+                                        let remaining =
+                                            end_line_content.safe_slice_from(end_col).to_string();
 
                                         // Append remaining to start line and remove the end line
-                                        if let Some(start_line_ref) = self.current_buffer_mut().line_mut(start_line) {
+                                        if let Some(start_line_ref) =
+                                            self.current_buffer_mut().line_mut(start_line)
+                                        {
                                             start_line_ref.append_str(&remaining);
                                         }
                                         self.current_buffer_mut().delete_line(remaining_line_idx);
@@ -2768,12 +2950,17 @@ impl EditorState {
                                 if ch == '\n' {
                                     let cursor_line = self.current_window().cursor_line();
                                     let cursor_col = self.current_window().cursor_col();
-                                    self.current_buffer_mut().insert_newline(cursor_line, cursor_col);
+                                    self.current_buffer_mut()
+                                        .insert_newline(cursor_line, cursor_col);
                                     self.current_window_mut().set_cursor(cursor_line + 1, 0);
                                 } else {
                                     let cursor_line = self.current_window().cursor_line();
                                     let cursor_col = self.current_window().cursor_col();
-                                    self.current_buffer_mut().insert_char(cursor_line, cursor_col, ch);
+                                    self.current_buffer_mut().insert_char(
+                                        cursor_line,
+                                        cursor_col,
+                                        ch,
+                                    );
                                     // Advance cursor by 1 char
                                     let new_col = cursor_col + ch.len_utf8();
                                     self.current_window_mut().set_cursor(cursor_line, new_col);
@@ -2782,11 +2969,14 @@ impl EditorState {
 
                             self.current_buffer_mut().set_modified(true);
                             self.display.force_redraw();
-                            self.display.set_message(&format!("Region filtered through '{}'", command));
+                            self.display
+                                .set_message(&format!("Region filtered through '{}'", command));
                         } else {
                             // Show output in *Shell Command Output* buffer
                             let buf_name = "*Shell Command Output*";
-                            if let Some(idx) = self.buffers.iter().position(|b| b.name() == buf_name) {
+                            if let Some(idx) =
+                                self.buffers.iter().position(|b| b.name() == buf_name)
+                            {
                                 self.buffers[idx].set_content(&output_text);
                                 if let Some(window) = self.windows.get_mut(self.current_window) {
                                     window.set_buffer_idx(idx);
@@ -2802,7 +2992,8 @@ impl EditorState {
                                 }
                             }
                             self.display.force_redraw();
-                            self.display.set_message(&format!("Shell command on region: {}", command));
+                            self.display
+                                .set_message(&format!("Shell command on region: {}", command));
                         }
                     }
                     Err(e) => {
@@ -2811,7 +3002,8 @@ impl EditorState {
                 }
             }
             Err(e) => {
-                self.display.set_message(&format!("Failed to run command: {}", e));
+                self.display
+                    .set_message(&format!("Failed to run command: {}", e));
             }
         }
     }
@@ -2866,7 +3058,8 @@ impl EditorState {
         }
 
         if saved_count > 0 {
-            self.display.set_message(&format!("Auto-saved {} buffer(s)", saved_count));
+            self.display
+                .set_message(&format!("Auto-saved {} buffer(s)", saved_count));
         }
     }
 

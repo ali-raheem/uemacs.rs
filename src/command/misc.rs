@@ -1,9 +1,10 @@
 //! Miscellaneous commands
 
+use super::mark::get_region;
+use super::CommandStatus;
 use crate::editor::EditorState;
 use crate::error::Result;
-use super::CommandStatus;
-use super::mark::get_region;
+use unicode_width::UnicodeWidthChar;
 
 /// Redraw the display
 /// Recenter display with cursor line in middle of window (C-l)
@@ -39,7 +40,11 @@ pub fn toggle_line_numbers(editor: &mut EditorState, _f: bool, _n: i32) -> Resul
 }
 
 /// Toggle syntax highlighting (C-x s)
-pub fn toggle_syntax_highlighting(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+pub fn toggle_syntax_highlighting(
+    editor: &mut EditorState,
+    _f: bool,
+    _n: i32,
+) -> Result<CommandStatus> {
     editor.syntax.toggle();
     editor.force_redraw();
     let status = if editor.syntax.enabled {
@@ -48,6 +53,56 @@ pub fn toggle_syntax_highlighting(editor: &mut EditorState, _f: bool, _n: i32) -
         "Syntax highlighting disabled"
     };
     editor.display.set_message(status);
+    Ok(CommandStatus::Success)
+}
+
+/// Toggle exact/case-sensitive search mode for the current buffer
+pub fn toggle_exact_search(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+    let exact = editor.current_buffer().modes().exact;
+    editor.current_buffer_mut().modes_mut().exact = !exact;
+    if exact {
+        editor
+            .display
+            .set_message("Exact search disabled (case-insensitive)");
+    } else {
+        editor.display.set_message("Exact search enabled");
+    }
+    Ok(CommandStatus::Success)
+}
+
+/// Toggle overwrite mode for the current buffer
+pub fn toggle_overwrite_mode(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+    let overwrite = editor.current_buffer().modes().overwrite;
+    editor.current_buffer_mut().modes_mut().overwrite = !overwrite;
+    if overwrite {
+        editor.display.set_message("Overwrite mode disabled");
+    } else {
+        editor.display.set_message("Overwrite mode enabled");
+    }
+    Ok(CommandStatus::Success)
+}
+
+/// Toggle hard-wrap mode for the current buffer
+pub fn toggle_wrap_mode(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+    let wrap = editor.current_buffer().modes().wrap;
+    editor.current_buffer_mut().modes_mut().wrap = !wrap;
+    if wrap {
+        editor.display.set_message("Wrap mode disabled");
+    } else {
+        editor.display.set_message("Wrap mode enabled");
+    }
+    Ok(CommandStatus::Success)
+}
+
+/// Toggle C indentation mode for the current buffer
+pub fn toggle_c_mode(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+    let c_mode = editor.current_buffer().modes().c_mode;
+    editor.current_buffer_mut().modes_mut().c_mode = !c_mode;
+    if c_mode {
+        editor.display.set_message("C mode disabled");
+    } else {
+        editor.display.set_message("C mode enabled");
+    }
     Ok(CommandStatus::Success)
 }
 
@@ -88,26 +143,42 @@ pub fn abort(_editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStat
 
 /// Execute shell command
 pub fn shell_command(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
-    editor.start_prompt("Shell command", crate::editor::PromptAction::ShellCommand, None);
+    editor.start_prompt(
+        "Shell command",
+        crate::editor::PromptAction::ShellCommand,
+        None,
+    );
     Ok(CommandStatus::Success)
 }
 
 /// Execute a command by name (M-x)
-pub fn execute_extended_command(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+pub fn execute_extended_command(
+    editor: &mut EditorState,
+    _f: bool,
+    _n: i32,
+) -> Result<CommandStatus> {
     editor.start_prompt("M-x", crate::editor::PromptAction::ExtendedCommand, None);
     Ok(CommandStatus::Success)
 }
 
 /// Filter buffer through shell command (C-x |)
 pub fn filter_buffer(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
-    editor.start_prompt("Filter through", crate::editor::PromptAction::FilterBuffer, None);
+    editor.start_prompt(
+        "Filter through",
+        crate::editor::PromptAction::FilterBuffer,
+        None,
+    );
     Ok(CommandStatus::Success)
 }
 
 /// Pipe region through shell command (M-|)
 /// Without C-u: output goes to *Shell Command Output* buffer
 /// With C-u: output replaces the region
-pub fn shell_command_on_region(editor: &mut EditorState, f: bool, _n: i32) -> Result<CommandStatus> {
+pub fn shell_command_on_region(
+    editor: &mut EditorState,
+    f: bool,
+    _n: i32,
+) -> Result<CommandStatus> {
     // Get and store the region
     let region = match get_region(editor) {
         Some(r) => r,
@@ -153,9 +224,22 @@ pub fn what_cursor_position(editor: &mut EditorState, _f: bool, _n: i32) -> Resu
     };
 
     let msg = if char_code.is_empty() {
-        format!("Line {} of {} Col {} {}", cursor_line + 1, line_count, cursor_col, char_info)
+        format!(
+            "Line {} of {} Col {} {}",
+            cursor_line + 1,
+            line_count,
+            cursor_col,
+            char_info
+        )
     } else {
-        format!("Line {} of {} Col {} {} ({})", cursor_line + 1, line_count, cursor_col, char_info, char_code)
+        format!(
+            "Line {} of {} Col {} {} ({})",
+            cursor_line + 1,
+            line_count,
+            cursor_col,
+            char_info,
+            char_code
+        )
     };
 
     editor.display.set_message(&msg);
@@ -208,7 +292,9 @@ pub fn just_one_space(editor: &mut EditorState, _f: bool, _n: i32) -> Result<Com
             }
             editor.current_buffer_mut().set_modified(true);
             // Move cursor to after the space
-            editor.current_window_mut().set_cursor(cursor_line, start + 1);
+            editor
+                .current_window_mut()
+                .set_cursor(cursor_line, start + 1);
         }
     }
 
@@ -216,7 +302,11 @@ pub fn just_one_space(editor: &mut EditorState, _f: bool, _n: i32) -> Result<Com
 }
 
 /// Delete all spaces and tabs around cursor (M-\)
-pub fn delete_horizontal_space(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
+pub fn delete_horizontal_space(
+    editor: &mut EditorState,
+    _f: bool,
+    _n: i32,
+) -> Result<CommandStatus> {
     let cursor_line = editor.current_window().cursor_line();
     let cursor_col = editor.current_window().cursor_col();
 
@@ -351,18 +441,28 @@ pub fn delete_blank_lines(editor: &mut EditorState, _f: bool, _n: i32) -> Result
 
 /// Insert spaces to next tab stop (M-i)
 pub fn tab_to_tab_stop(editor: &mut EditorState, f: bool, n: i32) -> Result<CommandStatus> {
-    let tab_width = 8; // Standard tab width
+    let tab_width = editor.tab_width();
     let count = if f { n.max(1) } else { 1 };
 
     for _ in 0..count {
         let cursor_line = editor.current_window().cursor_line();
         let cursor_col = editor.current_window().cursor_col();
 
-        // Calculate display column
+        // Calculate display column, expanding existing tabs using configured tab width.
         let display_col = editor
             .current_buffer()
             .line(cursor_line)
-            .map(|l| l.byte_to_col(cursor_col))
+            .map(|line| {
+                let mut col = 0;
+                for ch in line.text()[..cursor_col.min(line.len())].chars() {
+                    if ch == '\t' {
+                        col += tab_width - (col % tab_width);
+                    } else {
+                        col += UnicodeWidthChar::width(ch).unwrap_or(1);
+                    }
+                }
+                col
+            })
             .unwrap_or(0);
 
         // Calculate spaces needed to reach next tab stop
@@ -389,11 +489,18 @@ pub fn describe_key(editor: &mut EditorState, _f: bool, _n: i32) -> Result<Comma
     if let Some(k) = key {
         // Look up the binding
         if let Some(name) = editor.key_table().lookup_name(k) {
-            editor.display.set_message(&format!("{} runs the command {}", k.display_name(), name));
+            editor
+                .display
+                .set_message(&format!("{} runs the command {}", k.display_name(), name));
         } else if k.is_self_insert() {
-            editor.display.set_message(&format!("{} runs the command self-insert-command", k.display_name()));
+            editor.display.set_message(&format!(
+                "{} runs the command self-insert-command",
+                k.display_name()
+            ));
         } else {
-            editor.display.set_message(&format!("{} is not bound", k.display_name()));
+            editor
+                .display
+                .set_message(&format!("{} is not bound", k.display_name()));
         }
     } else {
         editor.display.set_message("Aborted");
@@ -423,7 +530,9 @@ pub fn trim_line(editor: &mut EditorState, f: bool, _n: i32) -> Result<CommandSt
         }
         if trimmed_count > 0 {
             editor.current_buffer_mut().set_modified(true);
-            editor.display.set_message(&format!("Trimmed {} lines", trimmed_count));
+            editor
+                .display
+                .set_message(&format!("Trimmed {} lines", trimmed_count));
         } else {
             editor.display.set_message("No trailing whitespace found");
         }
@@ -437,13 +546,16 @@ pub fn trim_line(editor: &mut EditorState, f: bool, _n: i32) -> Result<CommandSt
             editor.display.set_message("No trailing whitespace");
         }
         // Make sure cursor doesn't go past end of line
-        let line_len = editor.current_buffer()
+        let line_len = editor
+            .current_buffer()
             .line(cursor_line)
             .map(|l| l.len())
             .unwrap_or(0);
         let cursor_col = editor.current_window().cursor_col();
         if cursor_col > line_len {
-            editor.current_window_mut().set_cursor(cursor_line, line_len);
+            editor
+                .current_window_mut()
+                .set_cursor(cursor_line, line_len);
         }
     }
 
@@ -476,76 +588,81 @@ pub fn word_count(editor: &mut EditorState, _f: bool, _n: i32) -> Result<Command
     // Check if region is active (mark is set)
     let region = get_region(editor);
 
-    let (lines, words, chars, description) = if let Some((start_line, start_col, end_line, end_col)) = region {
-        // Count in region
-        let mut line_count = 0;
-        let mut word_count = 0;
-        let mut char_count = 0;
-        let mut in_word = false;
+    let (lines, words, chars, description) =
+        if let Some((start_line, start_col, end_line, end_col)) = region {
+            // Count in region
+            let mut line_count = 0;
+            let mut word_count = 0;
+            let mut char_count = 0;
+            let mut in_word = false;
 
-        for line_idx in start_line..=end_line {
-            if let Some(line) = editor.current_buffer().line(line_idx) {
-                let text = line.text();
-                let start = if line_idx == start_line { start_col } else { 0 };
-                let end = if line_idx == end_line { end_col } else { text.len() };
+            for line_idx in start_line..=end_line {
+                if let Some(line) = editor.current_buffer().line(line_idx) {
+                    let text = line.text();
+                    let start = if line_idx == start_line { start_col } else { 0 };
+                    let end = if line_idx == end_line {
+                        end_col
+                    } else {
+                        text.len()
+                    };
 
-                // Get the slice of text in the region
-                let slice = if end > start && end <= text.len() {
-                    &text[start..end]
-                } else {
-                    ""
-                };
+                    // Get the slice of text in the region
+                    let slice = if end > start && end <= text.len() {
+                        &text[start..end]
+                    } else {
+                        ""
+                    };
 
-                for ch in slice.chars() {
-                    char_count += 1;
-                    if ch.is_whitespace() {
+                    for ch in slice.chars() {
+                        char_count += 1;
+                        if ch.is_whitespace() {
+                            in_word = false;
+                        } else if !in_word {
+                            word_count += 1;
+                            in_word = true;
+                        }
+                    }
+
+                    // Count newline as character (except for last line of region)
+                    if line_idx < end_line {
+                        char_count += 1; // newline
                         in_word = false;
-                    } else if !in_word {
-                        word_count += 1;
-                        in_word = true;
+                        line_count += 1;
                     }
                 }
-
-                // Count newline as character (except for last line of region)
-                if line_idx < end_line {
-                    char_count += 1; // newline
-                    in_word = false;
-                    line_count += 1;
-                }
             }
-        }
-        line_count += 1; // Count the region span as at least 1 line
+            line_count += 1; // Count the region span as at least 1 line
 
-        (line_count, word_count, char_count, "Region")
-    } else {
-        // Count in entire buffer
-        let line_count = editor.current_buffer().line_count();
-        let mut word_count = 0;
-        let mut char_count = 0;
-        let mut in_word = false;
+            (line_count, word_count, char_count, "Region")
+        } else {
+            // Count in entire buffer
+            let line_count = editor.current_buffer().line_count();
+            let mut word_count = 0;
+            let mut char_count = 0;
+            let mut in_word = false;
 
-        for line_idx in 0..line_count {
-            if let Some(line) = editor.current_buffer().line(line_idx) {
-                let text = line.text();
-                for ch in text.chars() {
-                    char_count += 1;
-                    if ch.is_whitespace() {
+            for line_idx in 0..line_count {
+                if let Some(line) = editor.current_buffer().line(line_idx) {
+                    let text = line.text();
+                    for ch in text.chars() {
+                        char_count += 1;
+                        if ch.is_whitespace() {
+                            in_word = false;
+                        } else if !in_word {
+                            word_count += 1;
+                            in_word = true;
+                        }
+                    }
+                    // Count newline as character (except for last line)
+                    if line_idx + 1 < line_count {
+                        char_count += 1; // newline
                         in_word = false;
-                    } else if !in_word {
-                        word_count += 1;
-                        in_word = true;
                     }
                 }
-                // Count newline as character (except for last line)
-                if line_idx + 1 < line_count {
-                    char_count += 1; // newline
-                    in_word = false;
-                }
             }
-        }
 
-        (line_count, word_count, char_count, "Buffer")
-    };
+            (line_count, word_count, char_count, "Buffer")
+        };
 
     editor.display.set_message(&format!(
         "{}: {} lines, {} words, {} characters",
@@ -554,7 +671,6 @@ pub fn word_count(editor: &mut EditorState, _f: bool, _n: i32) -> Result<Command
 
     Ok(CommandStatus::Success)
 }
-
 
 /// Display current line number (C-x l)
 pub fn what_line(editor: &mut EditorState, _f: bool, _n: i32) -> Result<CommandStatus> {
@@ -603,8 +719,9 @@ pub fn sort_lines(editor: &mut EditorState, _f: bool, _n: i32) -> Result<Command
     }
 
     editor.current_buffer_mut().set_modified(true);
-    editor.display.set_message(&format!("Sorted {} lines", end_line - start_line + 1));
+    editor
+        .display
+        .set_message(&format!("Sorted {} lines", end_line - start_line + 1));
 
     Ok(CommandStatus::Success)
 }
-

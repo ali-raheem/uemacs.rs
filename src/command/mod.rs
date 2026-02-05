@@ -3,21 +3,21 @@
 //! This module provides the key binding table and command implementations.
 //! Commands are organized into submodules by category.
 
-mod navigation;
-mod editing;
-mod mark;
-mod search;
-mod files;
-mod windows;
-mod macros;
 mod case;
+mod editing;
+mod files;
+mod macros;
+mod mark;
 mod misc;
+mod navigation;
+mod search;
+mod windows;
 
 use std::collections::HashMap;
 
 use crate::editor::EditorState;
 use crate::error::Result;
-use crate::input::{Key, key_flags};
+use crate::input::{key_flags, Key};
 
 /// Command result status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,12 +67,24 @@ impl KeyTable {
 
     /// Add a key binding with command name
     pub fn bind_named(&mut self, key: Key, cmd: CommandFn, name: &'static str) {
-        self.bindings.insert(key.code(), BindingEntry { function: cmd, name });
+        self.bindings.insert(
+            key.code(),
+            BindingEntry {
+                function: cmd,
+                name,
+            },
+        );
     }
 
     /// Add a key binding (uses function pointer as identifier)
     pub fn bind(&mut self, key: Key, cmd: CommandFn) {
-        self.bindings.insert(key.code(), BindingEntry { function: cmd, name: "unknown" });
+        self.bindings.insert(
+            key.code(),
+            BindingEntry {
+                function: cmd,
+                name: "unknown",
+            },
+        );
     }
 
     /// Remove a key binding
@@ -92,7 +104,8 @@ impl KeyTable {
 
     /// Get all bindings as (key_code, command_name) pairs
     pub fn all_bindings(&self) -> Vec<(u32, &'static str)> {
-        let mut bindings: Vec<_> = self.bindings
+        let mut bindings: Vec<_> = self
+            .bindings
             .iter()
             .map(|(&code, entry)| (code, entry.name))
             .collect();
@@ -110,10 +123,7 @@ impl KeyTable {
 
     /// Get all unique command names (sorted)
     pub fn command_names(&self) -> Vec<&'static str> {
-        let mut names: Vec<_> = self.bindings
-            .values()
-            .map(|entry| entry.name)
-            .collect();
+        let mut names: Vec<_> = self.bindings.values().map(|entry| entry.name).collect();
         names.sort();
         names.dedup();
         names
@@ -122,15 +132,15 @@ impl KeyTable {
     /// Set up default key bindings
     fn setup_defaults(&mut self) {
         use crate::input::key_flags;
-        use navigation::*;
-        use editing::*;
-        use mark::*;
-        use search::*;
-        use files::*;
-        use windows::*;
-        use macros::*;
         use case::*;
+        use editing::*;
+        use files::*;
+        use macros::*;
+        use mark::*;
         use misc::*;
+        use navigation::*;
+        use search::*;
+        use windows::*;
 
         // Basic cursor movement
         self.bind_named(Key::ctrl('f'), forward_char, "forward-char");
@@ -160,7 +170,23 @@ impl KeyTable {
         // Screen refresh
         self.bind_named(Key::ctrl('l'), redraw_display, "redraw-display");
         self.bind_named(Key::ctlx('#'), toggle_line_numbers, "toggle-line-numbers");
-        self.bind_named(Key::ctlx('s'), toggle_syntax_highlighting, "toggle-syntax-highlighting");
+        self.bind_named(
+            Key::ctlx('s'),
+            toggle_syntax_highlighting,
+            "toggle-syntax-highlighting",
+        );
+        self.bind_named(
+            Key::ctlx_meta('e'),
+            toggle_exact_search,
+            "toggle-exact-search",
+        );
+        self.bind_named(
+            Key::ctlx_meta('o'),
+            toggle_overwrite_mode,
+            "toggle-overwrite-mode",
+        );
+        self.bind_named(Key::ctlx_meta('w'), toggle_wrap_mode, "toggle-wrap-mode");
+        self.bind_named(Key::ctlx_meta('c'), toggle_c_mode, "toggle-c-mode");
 
         // Quit
         self.bind_named(Key::ctlx_ctrl('c'), quit, "save-buffers-kill-emacs");
@@ -250,11 +276,19 @@ impl KeyTable {
 
         // Shell
         self.bind_named(Key::meta('!'), shell_command, "shell-command");
-        self.bind_named(Key::meta('|'), shell_command_on_region, "shell-command-on-region");
+        self.bind_named(
+            Key::meta('|'),
+            shell_command_on_region,
+            "shell-command-on-region",
+        );
         self.bind_named(Key::ctlx('|'), filter_buffer, "filter-buffer");
 
         // Extended command
-        self.bind_named(Key::meta('x'), execute_extended_command, "execute-extended-command");
+        self.bind_named(
+            Key::meta('x'),
+            execute_extended_command,
+            "execute-extended-command",
+        );
 
         // Keyboard macros
         self.bind_named(Key::ctlx('('), start_macro, "kmacro-start-macro");
@@ -263,8 +297,16 @@ impl KeyTable {
         self.bind_named(Key::ctlx_meta('s'), store_macro, "store-kbd-macro");
         self.bind_named(Key::ctlx_meta('l'), load_macro, "load-kbd-macro");
         // Use M-S-s and M-S-l (uppercase) for file operations
-        self.bind_named(Key(key_flags::CTLX | key_flags::META | 'S' as u32), save_macros_to_file, "save-macros-to-file");
-        self.bind_named(Key(key_flags::CTLX | key_flags::META | 'L' as u32), load_macros_from_file, "load-macros-from-file");
+        self.bind_named(
+            Key(key_flags::CTLX | key_flags::META | 'S' as u32),
+            save_macros_to_file,
+            "save-macros-to-file",
+        );
+        self.bind_named(
+            Key(key_flags::CTLX | key_flags::META | 'L' as u32),
+            load_macros_from_file,
+            "load-macros-from-file",
+        );
 
         // Case operations
         self.bind_named(Key::meta('u'), upcase_word, "upcase-word");
@@ -274,15 +316,27 @@ impl KeyTable {
         self.bind_named(Key::ctlx_ctrl('l'), downcase_region, "downcase-region");
 
         // Swap mark and point
-        self.bind_named(Key::ctlx_ctrl('x'), exchange_point_and_mark, "exchange-point-and-mark");
+        self.bind_named(
+            Key::ctlx_ctrl('x'),
+            exchange_point_and_mark,
+            "exchange-point-and-mark",
+        );
 
         // Buffer position info
         self.bind_named(Key::ctlx('='), what_cursor_position, "what-cursor-position");
 
         // Whitespace operations
         self.bind_named(Key::meta(' '), just_one_space, "just-one-space");
-        self.bind_named(Key::meta('\\'), delete_horizontal_space, "delete-horizontal-space");
-        self.bind_named(Key::ctlx_ctrl('o'), delete_blank_lines, "delete-blank-lines");
+        self.bind_named(
+            Key::meta('\\'),
+            delete_horizontal_space,
+            "delete-horizontal-space",
+        );
+        self.bind_named(
+            Key::ctlx_ctrl('o'),
+            delete_blank_lines,
+            "delete-blank-lines",
+        );
 
         // Indentation
         self.bind_named(Key::meta('i'), tab_to_tab_stop, "tab-to-tab-stop");
@@ -295,7 +349,11 @@ impl KeyTable {
         self.bind_named(Key::meta('='), word_count, "count-words");
 
         // Navigation
-        self.bind_named(Key(key_flags::META | key_flags::CONTROL | 'f' as u32), goto_matching_fence, "goto-matching-fence");
+        self.bind_named(
+            Key(key_flags::META | key_flags::CONTROL | 'f' as u32),
+            goto_matching_fence,
+            "goto-matching-fence",
+        );
 
         // Whitespace cleanup
         self.bind_named(Key::ctlx('t'), trim_line, "trim-line");
@@ -304,7 +362,11 @@ impl KeyTable {
         self.bind_named(Key::meta('^'), join_line, "delete-indentation");
 
         // Scroll other window
-        self.bind_named(Key(key_flags::META | key_flags::CONTROL | 'v' as u32), scroll_other_window, "scroll-other-window");
+        self.bind_named(
+            Key(key_flags::META | key_flags::CONTROL | 'v' as u32),
+            scroll_other_window,
+            "scroll-other-window",
+        );
 
         // Information
         self.bind_named(Key::ctlx('l'), what_line, "what-line");
@@ -319,11 +381,23 @@ impl KeyTable {
         self.bind_named(Key::meta('@'), mark_word, "mark-word");
 
         // Kill operations
-        self.bind_named(Key(key_flags::META | key_flags::CONTROL | 'k' as u32), kill_paragraph, "kill-paragraph");
-        self.bind_named(Key(key_flags::META | key_flags::CONTROL | 'w' as u32), append_next_kill, "append-next-kill");
+        self.bind_named(
+            Key(key_flags::META | key_flags::CONTROL | 'k' as u32),
+            kill_paragraph,
+            "kill-paragraph",
+        );
+        self.bind_named(
+            Key(key_flags::META | key_flags::CONTROL | 'w' as u32),
+            append_next_kill,
+            "append-next-kill",
+        );
 
         // Line splitting
-        self.bind_named(Key(key_flags::META | key_flags::CONTROL | 'o' as u32), split_line, "split-line");
+        self.bind_named(
+            Key(key_flags::META | key_flags::CONTROL | 'o' as u32),
+            split_line,
+            "split-line",
+        );
 
         // Indentation
         self.bind_named(Key::ctlx_ctrl('i'), indent_rigidly, "indent-rigidly");
@@ -383,15 +457,15 @@ pub fn is_read_only_blocked_command(name: &str) -> bool {
 
 // Re-export commands module for backwards compatibility
 pub mod commands {
-    pub use super::navigation::*;
-    pub use super::editing::*;
-    pub use super::mark::*;
-    pub use super::search::*;
-    pub use super::files::*;
-    pub use super::windows::*;
-    pub use super::macros::*;
     pub use super::case::*;
+    pub use super::editing::*;
+    pub use super::files::*;
+    pub use super::macros::*;
+    pub use super::mark::*;
     pub use super::misc::*;
+    pub use super::navigation::*;
+    pub use super::search::*;
+    pub use super::windows::*;
 }
 
 #[cfg(test)]

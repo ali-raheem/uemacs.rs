@@ -102,7 +102,11 @@ impl Display {
             return 0;
         }
         // Width of largest line number + 1 for separator space
-        let digits = if line_count == 0 { 1 } else { (line_count as f64).log10().floor() as usize + 1 };
+        let digits = if line_count == 0 {
+            1
+        } else {
+            (line_count as f64).log10().floor() as usize + 1
+        };
         digits.max(3) + 1 // minimum 3 digits + space
     }
 
@@ -218,7 +222,14 @@ impl Display {
                 let syntax_spans = syntax.highlight_line(buf_idx, line_idx, text, line_count);
 
                 // Render line content with syntax and region highlighting
-                self.render_line_with_highlighting(terminal, text, line_idx, text_cols, &region, &syntax_spans)?;
+                self.render_line_with_highlighting(
+                    terminal,
+                    text,
+                    line_idx,
+                    text_cols,
+                    &region,
+                    &syntax_spans,
+                )?;
             } else {
                 // Empty line indicator (like vim's ~)
                 if self.show_line_numbers {
@@ -249,7 +260,9 @@ impl Display {
         region: &Option<Region>,
     ) -> Result<()> {
         // Check if this line intersects with the region
-        let intersection = region.as_ref().and_then(|r| r.line_intersection(line_idx, text.len()));
+        let intersection = region
+            .as_ref()
+            .and_then(|r| r.line_intersection(line_idx, text.len()));
 
         match intersection {
             None => {
@@ -332,7 +345,9 @@ impl Display {
         syntax_spans: &[Span],
     ) -> Result<()> {
         // Get region intersection if any
-        let region_intersection = region.as_ref().and_then(|r| r.line_intersection(line_idx, text.len()));
+        let region_intersection = region
+            .as_ref()
+            .and_then(|r| r.line_intersection(line_idx, text.len()));
 
         // If no syntax spans and no region, render plain
         if syntax_spans.is_empty() && region_intersection.is_none() {
@@ -423,16 +438,44 @@ impl Display {
             format!("{}%", cursor_line * 100 / line_count)
         };
 
+        let mut mode_flags = Vec::new();
+        let modes = buffer.modes();
+        if modes.view {
+            mode_flags.push("RO");
+        }
+        if modes.overwrite {
+            mode_flags.push("OVR");
+        }
+        if modes.wrap {
+            mode_flags.push("WRAP");
+        }
+        if modes.c_mode {
+            mode_flags.push("C");
+        }
+        if !modes.exact {
+            mode_flags.push("NoExact");
+        }
+        let mode_suffix = if mode_flags.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", mode_flags.join(","))
+        };
+
         // Format: -- uEmacs.rs: buffername (filename) --line-- percent --
         let indicator = if is_current { "=" } else { "-" };
         let mode_line = format!(
-            "{}{} uEmacs.rs: {} ({}) L{} {} {}",
+            "{}{} uEmacs.rs: {} ({}) L{} {}{} {}",
             modified,
             indicator,
             name,
-            if filename.is_empty() { "no file" } else { &filename },
+            if filename.is_empty() {
+                "no file"
+            } else {
+                &filename
+            },
             cursor_line,
             percent,
+            mode_suffix,
             indicator.repeat(10)
         );
 
@@ -450,12 +493,7 @@ impl Display {
     }
 
     /// Render the minibuffer (message area)
-    fn render_minibuffer(
-        &self,
-        terminal: &mut Terminal,
-        row: u16,
-        cols: usize,
-    ) -> Result<()> {
+    fn render_minibuffer(&self, terminal: &mut Terminal, row: u16, cols: usize) -> Result<()> {
         terminal.move_cursor(row, 0)?;
 
         if let Some(ref msg) = self.message {
