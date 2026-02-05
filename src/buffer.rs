@@ -34,13 +34,26 @@ pub enum UndoEntry {
 }
 
 /// Buffer flags/modes (matching original C version)
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct BufferModes {
     pub wrap: bool,      // Word wrap mode
     pub c_mode: bool,    // C indentation mode
     pub exact: bool,     // Exact case matching for search
     pub view: bool,      // Read-only view mode
     pub overwrite: bool, // Overwrite mode
+}
+
+impl Default for BufferModes {
+    fn default() -> Self {
+        Self {
+            wrap: false,
+            c_mode: false,
+            // Preserve current behavior: searches are exact by default.
+            exact: true,
+            view: false,
+            overwrite: false,
+        }
+    }
 }
 
 /// A buffer containing text and metadata

@@ -499,8 +499,76 @@ pub fn zap_to_char(editor: &mut EditorState, _f: bool, n: i32) -> Result<Command
                 return Ok(CommandStatus::Failure);
             }
         } else {
-            editor.display.set_message("Backward zap not yet implemented");
-            return Ok(CommandStatus::Failure);
+            let mut found_pos: Option<(usize, usize)> = None;
+            let mut search_line = cursor_line;
+            let mut search_up_to = cursor_col;
+
+            'search: loop {
+                if let Some(line) = editor.current_buffer().line(search_line) {
+                    let text = line.text();
+                    for (pos, ch) in text[..search_up_to].char_indices().rev() {
+                        if ch == target {
+                            found_pos = Some((search_line, pos));
+                            break 'search;
+                        }
+                    }
+                }
+
+                if search_line == 0 {
+                    break;
+                }
+                search_line -= 1;
+                search_up_to = editor.current_buffer()
+                    .line(search_line)
+                    .map(|l| l.len())
+                    .unwrap_or(0);
+            }
+
+            let (target_line, target_col) = match found_pos {
+                Some(pos) => pos,
+                None => {
+                    editor.display.set_message(&format!("'{}' not found", target));
+                    return Ok(CommandStatus::Failure);
+                }
+            };
+
+            let mut deleted = String::new();
+
+            while editor.current_window().cursor_line() > target_line
+                || (editor.current_window().cursor_line() == target_line
+                    && editor.current_window().cursor_col() > target_col)
+            {
+                let cur_line = editor.current_window().cursor_line();
+                let cur_col = editor.current_window().cursor_col();
+
+                if cur_col > 0 {
+                    if let Some((ch, new_col)) =
+                        editor.current_buffer_mut().delete_backward(cur_line, cur_col)
+                    {
+                        editor.current_window_mut().set_cursor(cur_line, new_col);
+                        deleted.insert(0, ch);
+                    } else {
+                        break;
+                    }
+                } else if cur_line > 0 {
+                    if let Some(join_pos) = editor.current_buffer_mut().join_with_previous(cur_line) {
+                        editor.current_window_mut().set_cursor(cur_line - 1, join_pos);
+                        deleted.insert(0, '\n');
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            if deleted.is_empty() {
+                editor.display.set_message("Nothing to zap");
+                return Ok(CommandStatus::Failure);
+            }
+
+            editor.kill_prepend(&deleted);
+            editor.invalidate_syntax_from(target_line);
         }
     }
 

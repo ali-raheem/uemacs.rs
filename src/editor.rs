@@ -3,6 +3,8 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use regex::RegexBuilder;
+
 use crate::buffer::Buffer;
 use crate::command::{CommandStatus, KeyTable};
 use crate::display::Display;
@@ -178,6 +180,8 @@ pub struct QueryReplaceState {
     pub replace: String,
     /// Replace all remaining without prompting
     pub replace_all: bool,
+    /// Whether search has already wrapped once
+    pub wrapped: bool,
     /// Number of replacements made
     pub count: usize,
 }
@@ -189,6 +193,7 @@ impl Default for QueryReplaceState {
             search: String::new(),
             replace: String::new(),
             replace_all: false,
+            wrapped: false,
             count: 0,
         }
     }
@@ -1091,6 +1096,75 @@ impl EditorState {
         self.last_was_kill = false;
     }
 
+    /// Find first match in text from byte position.
+    fn find_from(&self, text: &str, start: usize, pattern: &str) -> Option<usize> {
+        let start = start.min(text.len());
+        if start >= text.len() {
+            return None;
+        }
+
+        if self.current_buffer().modes().exact {
+            text[start..].find(pattern).map(|pos| start + pos)
+        } else {
+            let re = RegexBuilder::new(&regex::escape(pattern))
+                .case_insensitive(true)
+                .build()
+                .ok()?;
+            re.find(&text[start..]).map(|m| start + m.start())
+        }
+    }
+
+    /// Find first match in text before a byte end position.
+    fn find_before(&self, text: &str, end: usize, pattern: &str) -> Option<usize> {
+        let end = end.min(text.len());
+        if end == 0 {
+            return None;
+        }
+        if self.current_buffer().modes().exact {
+            text[..end].find(pattern)
+        } else {
+            let re = RegexBuilder::new(&regex::escape(pattern))
+                .case_insensitive(true)
+                .build()
+                .ok()?;
+            re.find(&text[..end]).map(|m| m.start())
+        }
+    }
+
+    /// Find last match in text before a byte end position.
+    fn rfind_before(&self, text: &str, end: usize, pattern: &str) -> Option<usize> {
+        let end = end.min(text.len());
+        if end == 0 {
+            return None;
+        }
+        if self.current_buffer().modes().exact {
+            text[..end].rfind(pattern)
+        } else {
+            let re = RegexBuilder::new(&regex::escape(pattern))
+                .case_insensitive(true)
+                .build()
+                .ok()?;
+            re.find_iter(&text[..end]).last().map(|m| m.start())
+        }
+    }
+
+    /// Find last match in text from a byte start position.
+    fn rfind_from(&self, text: &str, start: usize, pattern: &str) -> Option<usize> {
+        let start = start.min(text.len());
+        if start >= text.len() {
+            return None;
+        }
+        if self.current_buffer().modes().exact {
+            text[start..].rfind(pattern).map(|pos| start + pos)
+        } else {
+            let re = RegexBuilder::new(&regex::escape(pattern))
+                .case_insensitive(true)
+                .build()
+                .ok()?;
+            re.find_iter(&text[start..]).last().map(|m| start + m.start())
+        }
+    }
+
     /// Start incremental search
     pub fn start_search(&mut self, direction: SearchDirection) {
         self.search.active = true;
@@ -1123,14 +1197,11 @@ impl EditorState {
                     if let Some(line) = self.current_buffer().line(line_idx) {
                         let text = line.text();
                         let col_start = if line_idx == start_line { search_start_col } else { 0 };
-                        if col_start < text.len() {
-                            if let Some(pos) = text[col_start..].find(&pattern) {
-                                let match_col = col_start + pos;
-                                self.current_window_mut().set_cursor(line_idx, match_col);
-                                self.ensure_cursor_visible();
-                                self.display.set_message(&format!("Found: {}", pattern));
-                                return true;
-                            }
+                        if let Some(match_col) = self.find_from(text, col_start, &pattern) {
+                            self.current_window_mut().set_cursor(line_idx, match_col);
+                            self.ensure_cursor_visible();
+                            self.display.set_message(&format!("Found: {}", pattern));
+                            return true;
                         }
                     }
                 }
@@ -1139,7 +1210,7 @@ impl EditorState {
                     if let Some(line) = self.current_buffer().line(line_idx) {
                         let text = line.text();
                         let col_end = if line_idx == start_line { start_col } else { text.len() };
-                        if let Some(pos) = text[..col_end].find(&pattern) {
+                        if let Some(pos) = self.find_before(text, col_end, &pattern) {
                             self.current_window_mut().set_cursor(line_idx, pos);
                             self.ensure_cursor_visible();
                             self.display.set_message(&format!("Wrapped: {}", pattern));
@@ -1154,7 +1225,7 @@ impl EditorState {
                     if let Some(line) = self.current_buffer().line(line_idx) {
                         let text = line.text();
                         let col_end = if line_idx == start_line { start_col } else { text.len() };
-                        if let Some(pos) = text[..col_end].rfind(&pattern) {
+                        if let Some(pos) = self.rfind_before(text, col_end, &pattern) {
                             self.current_window_mut().set_cursor(line_idx, pos);
                             self.ensure_cursor_visible();
                             self.display.set_message(&format!("Found: {}", pattern));
@@ -1167,14 +1238,11 @@ impl EditorState {
                     if let Some(line) = self.current_buffer().line(line_idx) {
                         let text = line.text();
                         let col_start = if line_idx == start_line { start_col + 1 } else { 0 };
-                        if col_start < text.len() {
-                            if let Some(pos) = text[col_start..].rfind(&pattern) {
-                                let match_col = col_start + pos;
-                                self.current_window_mut().set_cursor(line_idx, match_col);
-                                self.ensure_cursor_visible();
-                                self.display.set_message(&format!("Wrapped: {}", pattern));
-                                return true;
-                            }
+                        if let Some(match_col) = self.rfind_from(text, col_start, &pattern) {
+                            self.current_window_mut().set_cursor(line_idx, match_col);
+                            self.ensure_cursor_visible();
+                            self.display.set_message(&format!("Wrapped: {}", pattern));
+                            return true;
                         }
                     }
                 }
@@ -1217,15 +1285,12 @@ impl EditorState {
                             0
                         };
 
-                        if search_start < text.len() {
-                            if let Some(pos) = text[search_start..].find(&self.search.pattern) {
-                                let match_col = search_start + pos;
-                                self.current_window_mut().set_cursor(line_idx, match_col);
-                                self.search.last_match_line = Some(line_idx);
-                                self.search.last_match_col = Some(match_col);
-                                self.ensure_cursor_visible();
-                                return true;
-                            }
+                        if let Some(match_col) = self.find_from(text, search_start, &self.search.pattern) {
+                            self.current_window_mut().set_cursor(line_idx, match_col);
+                            self.search.last_match_line = Some(line_idx);
+                            self.search.last_match_col = Some(match_col);
+                            self.ensure_cursor_visible();
+                            return true;
                         }
                     }
                 }
@@ -1235,7 +1300,7 @@ impl EditorState {
                         let text = line.text();
                         let search_end = if line_idx == start_line { start_col } else { text.len() };
 
-                        if let Some(pos) = text[..search_end].find(&self.search.pattern) {
+                        if let Some(pos) = self.find_before(text, search_end, &self.search.pattern) {
                             self.current_window_mut().set_cursor(line_idx, pos);
                             self.search.last_match_line = Some(line_idx);
                             self.search.last_match_col = Some(pos);
@@ -1259,15 +1324,12 @@ impl EditorState {
                             text.len()
                         };
 
-                        if search_end > 0 {
-                            // Find last occurrence before search_end
-                            if let Some(pos) = text[..search_end].rfind(&self.search.pattern) {
-                                self.current_window_mut().set_cursor(line_idx, pos);
-                                self.search.last_match_line = Some(line_idx);
-                                self.search.last_match_col = Some(pos);
-                                self.ensure_cursor_visible();
-                                return true;
-                            }
+                        if let Some(pos) = self.rfind_before(text, search_end, &self.search.pattern) {
+                            self.current_window_mut().set_cursor(line_idx, pos);
+                            self.search.last_match_line = Some(line_idx);
+                            self.search.last_match_col = Some(pos);
+                            self.ensure_cursor_visible();
+                            return true;
                         }
                     }
                 }
@@ -1277,18 +1339,15 @@ impl EditorState {
                         let text = line.text();
                         let search_start = if line_idx == start_line { start_col + 1 } else { 0 };
 
-                        if search_start < text.len() {
-                            if let Some(pos) = text[search_start..].rfind(&self.search.pattern) {
-                                let match_col = search_start + pos;
-                                self.current_window_mut().set_cursor(line_idx, match_col);
-                                self.search.last_match_line = Some(line_idx);
-                                self.search.last_match_col = Some(match_col);
-                                self.ensure_cursor_visible();
-                                self.display.set_message(&format!("Wrapped: {}{}",
-                                    if self.search.direction == SearchDirection::Forward { "I-search: " } else { "I-search backward: " },
-                                    self.search.pattern));
-                                return true;
-                            }
+                        if let Some(match_col) = self.rfind_from(text, search_start, &self.search.pattern) {
+                            self.current_window_mut().set_cursor(line_idx, match_col);
+                            self.search.last_match_line = Some(line_idx);
+                            self.search.last_match_col = Some(match_col);
+                            self.ensure_cursor_visible();
+                            self.display.set_message(&format!("Wrapped: {}{}",
+                                if self.search.direction == SearchDirection::Forward { "I-search: " } else { "I-search backward: " },
+                                self.search.pattern));
+                            return true;
                         }
                     }
                 }
@@ -1584,6 +1643,7 @@ impl EditorState {
                 self.query_replace.replace = input;
                 self.query_replace.active = true;
                 self.query_replace.replace_all = false;
+                self.query_replace.wrapped = false;
                 self.query_replace.count = 0;
                 // Find first match
                 self.query_replace_next();
@@ -1879,22 +1939,50 @@ impl EditorState {
                     0
                 };
 
-                if search_start < text.len() {
-                    if let Some(pos) = text[search_start..].find(&pattern) {
-                        let match_col = search_start + pos;
+                if let Some(match_col) = self.find_from(text, search_start, &pattern) {
+                    self.current_window_mut().set_cursor(line_idx, match_col);
+                    self.ensure_cursor_visible();
+
+                    // Show prompt for this match
+                    if self.query_replace.replace_all {
+                        // Auto-replace without prompting
+                        self.query_replace_do_replace();
+                        return self.query_replace_next();
+                    } else {
+                        let search = &self.query_replace.search;
+                        let replace = &self.query_replace.replace;
+                        self.display.set_message(&format!(
+                            "Query replacing {} with {}: (y/n/!/q/?)",
+                            search, replace
+                        ));
+                    }
+                    return true;
+                }
+            }
+        }
+
+        // Wrap once to cover text before the original point.
+        if !self.query_replace.wrapped {
+            self.query_replace.wrapped = true;
+            for line_idx in 0..=start_line {
+                if let Some(line) = self.current_buffer().line(line_idx) {
+                    let text = line.text();
+                    let wrap_end = if line_idx == start_line {
+                        start_col
+                    } else {
+                        text.len()
+                    };
+                    if let Some(match_col) = self.find_before(text, wrap_end, &pattern) {
                         self.current_window_mut().set_cursor(line_idx, match_col);
                         self.ensure_cursor_visible();
-
-                        // Show prompt for this match
                         if self.query_replace.replace_all {
-                            // Auto-replace without prompting
                             self.query_replace_do_replace();
                             return self.query_replace_next();
                         } else {
                             let search = &self.query_replace.search;
                             let replace = &self.query_replace.replace;
                             self.display.set_message(&format!(
-                                "Query replacing {} with {}: (y/n/!/q/?)",
+                                "Wrapped query replace {} with {}: (y/n/!/q/?)",
                                 search, replace
                             ));
                         }
@@ -1904,7 +1992,7 @@ impl EditorState {
             }
         }
 
-        // No more matches - wrap to beginning? For now, just end
+        // No more matches.
         let count = self.query_replace.count;
         self.query_replace.active = false;
         self.display.set_message(&format!("Replaced {} occurrences", count));
@@ -2007,11 +2095,7 @@ impl EditorState {
                 // Find next occurrence in this line
                 let found = if let Some(line) = self.current_buffer().line(line_idx) {
                     let text = line.text();
-                    if search_from >= text.len() {
-                        None
-                    } else {
-                        text[search_from..].find(search).map(|pos| search_from + pos)
-                    }
+                    self.find_from(text, search_from, search)
                 } else {
                     None
                 };
