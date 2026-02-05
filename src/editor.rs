@@ -451,6 +451,11 @@ impl EditorState {
         if self.quote_pending {
             self.quote_pending = false;
             self.prefix_arg = PrefixArg::default(); // Clear prefix on quote
+            if self.current_buffer().modes().view {
+                self.display.set_message("Buffer is read-only");
+                self.terminal.beep()?;
+                return Ok(());
+            }
             if let Some(ch) = key.base_char() {
                 if ch == '\r' || ch == '\n' {
                     // Insert newline
@@ -564,6 +569,16 @@ impl EditorState {
 
         // Look up command
         if let Some(cmd) = self.keytab.lookup(key) {
+            if self.current_buffer().modes().view {
+                if let Some(name) = self.keytab.lookup_name(key) {
+                    if crate::command::is_read_only_blocked_command(name) {
+                        self.display.set_message("Buffer is read-only");
+                        self.terminal.beep()?;
+                        return Ok(());
+                    }
+                }
+            }
+
             // Execute command with prefix argument
             match cmd(self, has_arg, arg_value)? {
                 CommandStatus::Success => {
@@ -582,6 +597,12 @@ impl EditorState {
                 }
             }
         } else if key.is_self_insert() {
+            if self.current_buffer().modes().view {
+                self.display.set_message("Buffer is read-only");
+                self.terminal.beep()?;
+                return Ok(());
+            }
+
             // Self-insert character (possibly multiple times with prefix)
             if let Some(ch) = key.base_char() {
                 let count = if has_arg { arg_value.max(1) } else { 1 };
@@ -2095,11 +2116,7 @@ impl EditorState {
 
             // Buffer name (truncate if too long)
             let name = buffer.name();
-            let name_display = if name.len() > 16 {
-                &name[..16]
-            } else {
-                name
-            };
+            let name_display: String = name.chars().take(16).collect();
 
             // Size (line count)
             let size = buffer.line_count();
@@ -2201,6 +2218,13 @@ impl EditorState {
 
     /// Execute a command by name (M-x)
     pub fn execute_named_command(&mut self, name: &str) {
+        if self.current_buffer().modes().view
+            && crate::command::is_read_only_blocked_command(name)
+        {
+            self.display.set_message("Buffer is read-only");
+            return;
+        }
+
         // Look up the command by name
         let cmd_fn = self.keytab.lookup_by_name(name);
 
@@ -2531,28 +2555,13 @@ impl EditorState {
         let mut content = String::new();
         for line_idx in start_line..=end_line {
             if let Some(line) = self.current_buffer().line(line_idx) {
-                let text = line.text();
-                let line_start = if line_idx == start_line {
-                    // Convert char index to byte index
-                    text.char_indices()
-                        .nth(start_col)
-                        .map(|(i, _)| i)
-                        .unwrap_or(text.len())
-                } else {
-                    0
-                };
+                let line_start = if line_idx == start_line { start_col } else { 0 };
                 let line_end = if line_idx == end_line {
-                    text.char_indices()
-                        .nth(end_col)
-                        .map(|(i, _)| i)
-                        .unwrap_or(text.len())
+                    end_col
                 } else {
-                    text.len()
+                    line.len()
                 };
-
-                if line_start <= line_end && line_end <= text.len() {
-                    content.push_str(&text[line_start..line_end]);
-                }
+                content.push_str(line.safe_slice(line_start, line_end));
                 if line_idx < end_line {
                     content.push('\n');
                 }
@@ -2599,15 +2608,20 @@ impl EditorState {
                             if start_line == end_line {
                                 // Same line - simple case
                                 if let Some(line) = self.current_buffer_mut().line_mut(start_line) {
-                                    line.delete_range(start_col, end_col);
+                                    let actual_start = line.text().len() - line.safe_slice_from(start_col).len();
+                                    let actual_end = actual_start + line.safe_slice(start_col, end_col).len();
+                                    if actual_end > actual_start {
+                                        line.delete_range(actual_start, actual_end);
+                                    }
                                 }
                             } else {
                                 // Multi-line deletion
                                 // Delete from start_col to end of start_line
                                 if let Some(line) = self.current_buffer_mut().line_mut(start_line) {
                                     let line_len = line.len();
-                                    if start_col < line_len {
-                                        line.delete_range(start_col, line_len);
+                                    let actual_start = line.text().len() - line.safe_slice_from(start_col).len();
+                                    if actual_start < line_len {
+                                        line.delete_range(actual_start, line_len);
                                     }
                                 }
 
@@ -2621,11 +2635,7 @@ impl EditorState {
                                     // The end line is now at start_line + 1 (after removing intermediates)
                                     let remaining_line_idx = start_line + 1;
                                     if let Some(end_line_content) = self.current_buffer().line(remaining_line_idx) {
-                                        let remaining = if end_col < end_line_content.len() {
-                                            end_line_content.text()[end_col..].to_string()
-                                        } else {
-                                            String::new()
-                                        };
+                                        let remaining = end_line_content.safe_slice_from(end_col).to_string();
 
                                         // Append remaining to start line and remove the end line
                                         if let Some(start_line_ref) = self.current_buffer_mut().line_mut(start_line) {

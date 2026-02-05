@@ -336,6 +336,51 @@ impl Default for KeyTable {
     }
 }
 
+/// Commands that should be blocked when the current buffer is read-only.
+pub fn is_read_only_blocked_command(name: &str) -> bool {
+    matches!(
+        name,
+        "delete-char"
+            | "delete-backward-char"
+            | "zap-to-char"
+            | "kill-line"
+            | "yank"
+            | "yank-pop"
+            | "newline"
+            | "open-line"
+            | "newline-and-indent"
+            | "tab-to-tab-stop"
+            | "transpose-chars"
+            | "duplicate-line"
+            | "kill-word"
+            | "backward-kill-word"
+            | "fill-paragraph"
+            | "kill-region"
+            | "query-replace"
+            | "replace-string"
+            | "insert-file"
+            | "revert-buffer"
+            | "upcase-word"
+            | "downcase-word"
+            | "capitalize-word"
+            | "upcase-region"
+            | "downcase-region"
+            | "undo"
+            | "filter-buffer"
+            | "shell-command-on-region"
+            | "just-one-space"
+            | "delete-horizontal-space"
+            | "delete-blank-lines"
+            | "trim-line"
+            | "delete-indentation"
+            | "transpose-words"
+            | "transpose-lines"
+            | "kill-paragraph"
+            | "split-line"
+            | "indent-rigidly"
+    )
+}
+
 // Re-export commands module for backwards compatibility
 pub mod commands {
     pub use super::navigation::*;
@@ -347,4 +392,19 @@ pub mod commands {
     pub use super::macros::*;
     pub use super::case::*;
     pub use super::misc::*;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_read_only_blocked_command;
+
+    #[test]
+    fn test_read_only_blocked_command_list() {
+        assert!(is_read_only_blocked_command("delete-char"));
+        assert!(is_read_only_blocked_command("replace-string"));
+        assert!(is_read_only_blocked_command("transpose-lines"));
+        assert!(!is_read_only_blocked_command("forward-char"));
+        assert!(!is_read_only_blocked_command("toggle-read-only"));
+        assert!(!is_read_only_blocked_command("describe-key"));
+    }
 }
