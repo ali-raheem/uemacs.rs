@@ -325,6 +325,29 @@ mod tests {
     }
 
     #[test]
+    fn test_unterminated_quoted_string_does_not_poison_following_lines() {
+        let mut manager = SyntaxManager::new();
+        manager.set_buffer_language(0, Some(Path::new("test.rs")));
+        let buffer = Buffer::from_content(
+            "test.rs",
+            "let s = \"unterminated\nlet x = 42;\nlet y = 24;",
+        );
+
+        let _ = manager.highlight_line(0, 0, &buffer);
+        let line1 = manager.highlight_line(0, 1, &buffer);
+        let line2 = manager.highlight_line(0, 2, &buffer);
+
+        assert!(
+            !line1.is_empty(),
+            "line after unterminated quote should still tokenize normally"
+        );
+        assert!(
+            !line2.is_empty(),
+            "subsequent lines should not remain in string state"
+        );
+    }
+
+    #[test]
     fn test_no_language() {
         let mut manager = SyntaxManager::new();
         let buffer = Buffer::from_content("plain.txt", "some text");

@@ -3,7 +3,7 @@
 //! This module provides the LanguageDefinition struct that combines
 //! pattern rules, multiline rules, and keywords for a programming language.
 
-use super::rules::{PatternRule, MultilineRule, LineState, HighlightResult};
+use super::rules::{HighlightResult, LineState, MultilineRule, PatternRule};
 use super::style::Span;
 use super::tokens::TokenType;
 
@@ -74,10 +74,14 @@ impl LanguageDefinition {
                     } else {
                         // No end found - rest of line is inside this construct
                         spans.push(Span::new(pos, text.len(), rule.token_type.default_style()));
-                        return HighlightResult {
-                            spans,
-                            end_state: current_state,
+                        let end_state = if rule.escapable {
+                            // For normal quoted strings, don't let a missing quote
+                            // spill highlighting into following lines.
+                            LineState::default()
+                        } else {
+                            current_state
                         };
+                        return HighlightResult { spans, end_state };
                     }
                 } else {
                     // Invalid state - reset
@@ -108,11 +112,19 @@ impl LanguageDefinition {
                     continue;
                 } else {
                     // Multiline continues to next line
-                    spans.push(Span::new(start, text.len(), rule.token_type.default_style()));
-                    return HighlightResult {
-                        spans,
-                        end_state: LineState::inside(rule.state_id),
+                    spans.push(Span::new(
+                        start,
+                        text.len(),
+                        rule.token_type.default_style(),
+                    ));
+                    let end_state = if rule.escapable {
+                        // Escapable quote-delimited strings are treated as
+                        // single-line constructs to avoid state corruption.
+                        LineState::default()
+                    } else {
+                        LineState::inside(rule.state_id)
                     };
+                    return HighlightResult { spans, end_state };
                 }
             }
 
@@ -176,7 +188,14 @@ mod tests {
         }
 
         // Add block comment
-        if let Some(rule) = MultilineRule::new("block_comment", r"/\*", r"\*/", TokenType::Comment, 1) {
+        if let Some(rule) =
+            MultilineRule::new("block_comment", r"/\*", r"\*/", TokenType::Comment, 1)
+        {
+            lang.add_multiline(rule);
+        }
+        if let Some(rule) =
+            MultilineRule::with_escape("string", r#"""#, r#"""#, TokenType::String, 2, '\\')
+        {
             lang.add_multiline(rule);
         }
 
@@ -232,6 +251,13 @@ mod tests {
         let result = lang.highlight_line("end */ code", state);
 
         // Should return to normal
+        assert!(result.end_state.is_normal());
+    }
+
+    #[test]
+    fn test_escapable_string_does_not_persist_across_lines() {
+        let lang = create_test_language();
+        let result = lang.highlight_line(r#"let s = "unterminated"#, LineState::default());
         assert!(result.end_state.is_normal());
     }
 }
