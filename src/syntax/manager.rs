@@ -133,6 +133,21 @@ impl SyntaxManager {
         self.caches.remove(&buffer_idx);
     }
 
+    /// Remap cache indices after removing a buffer.
+    ///
+    /// All caches above `removed_idx` shift down by one.
+    pub fn remap_after_buffer_removal(&mut self, removed_idx: usize) {
+        let mut remapped = HashMap::with_capacity(self.caches.len());
+        for (idx, cache) in std::mem::take(&mut self.caches) {
+            if idx == removed_idx {
+                continue;
+            }
+            let new_idx = if idx > removed_idx { idx - 1 } else { idx };
+            remapped.insert(new_idx, cache);
+        }
+        self.caches = remapped;
+    }
+
     /// Set language for a buffer based on filename
     pub fn set_buffer_language(&mut self, buffer_idx: usize, filename: Option<&Path>) {
         let lang_name = filename.and_then(|f| self.detect_language(f)).map(|s| s.to_string());
@@ -290,5 +305,27 @@ mod tests {
         // No language set - should return empty spans
         let spans = manager.highlight_line(0, 0, "some text", 1);
         assert!(spans.is_empty());
+    }
+
+    #[test]
+    fn test_cache_remap_after_buffer_removal() {
+        let mut manager = SyntaxManager::new();
+        manager.set_buffer_language(0, Some(Path::new("a.rs")));
+        manager.set_buffer_language(1, Some(Path::new("b.py")));
+        manager.set_buffer_language(2, Some(Path::new("c.md")));
+
+        manager.remap_after_buffer_removal(1);
+
+        assert!(manager.caches.contains_key(&0));
+        assert!(manager.caches.contains_key(&1));
+        assert!(!manager.caches.contains_key(&2));
+        assert_eq!(
+            manager.caches.get(&0).and_then(|c| c.language.as_deref()),
+            Some("Rust")
+        );
+        assert_eq!(
+            manager.caches.get(&1).and_then(|c| c.language.as_deref()),
+            Some("Markdown")
+        );
     }
 }

@@ -1017,6 +1017,7 @@ impl EditorState {
                 return;
             }
             self.buffers.remove(idx);
+            self.syntax.remap_after_buffer_removal(idx);
             // Update window buffer indices
             for window in &mut self.windows {
                 let win_buf = window.buffer_idx();
@@ -1500,16 +1501,14 @@ impl EditorState {
                     Ok(()) => {
                         self.display.set_message(&format!("Opened {}", input));
                     }
+                    Err(crate::error::EditorError::Io(io_err))
+                        if io_err.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        self.open_new_file(&path);
+                    }
                     Err(e) => {
-                        // File doesn't exist - create new buffer with that name
-                        let mut buffer = Buffer::new(&input);
-                        buffer.set_filename(path);
-                        self.buffers.push(buffer);
-                        let buf_idx = self.buffers.len() - 1;
-                        if let Some(window) = self.windows.get_mut(self.current_window) {
-                            window.set_buffer_idx(buf_idx);
-                        }
-                        self.display.set_message(&format!("(New file) {}", input));
+                        self.display
+                            .set_message(&format!("Error opening {}: {}", input, e));
                     }
                 }
             }

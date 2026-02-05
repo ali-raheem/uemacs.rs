@@ -21,7 +21,7 @@ use std::process;
 
 use config::Config;
 use editor::EditorState;
-use error::Result;
+use error::{EditorError, Result};
 use terminal::Terminal;
 
 fn main() {
@@ -65,9 +65,13 @@ fn run() -> Result<()> {
     // Open file if provided
     if args.len() > 1 && !args[1].starts_with('-') {
         let path = PathBuf::from(&args[1]);
-        if let Err(_) = editor.open_file(&path) {
-            // File doesn't exist - create new buffer with that filename
-            editor.open_new_file(&path);
+        match editor.open_file(&path) {
+            Ok(()) => {}
+            Err(EditorError::Io(io_err)) if io_err.kind() == std::io::ErrorKind::NotFound => {
+                // File doesn't exist - create new buffer with that filename.
+                editor.open_new_file(&path);
+            }
+            Err(e) => return Err(e),
         }
     }
 
